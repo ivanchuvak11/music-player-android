@@ -25,7 +25,7 @@ import kotlinx.coroutines.launch
 /**
  * Main ViewModel exposing player state, local tracks, playlists, and radio stations to the UI layer.
  */
-class MainPlayerViewModel(
+class MainPlayerViewModel @JvmOverloads constructor(
     application: Application,
     private val playerController: PlayerController = PlayerControllerImpl(application),
     private val apiService: MusicApiService = NetworkClient.createService()
