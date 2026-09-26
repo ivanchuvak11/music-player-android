@@ -59,6 +59,9 @@ class MainPlayerViewModel(
     fun playNext() = playerController.playNext()
     fun playPrevious() = playerController.playPrevious()
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
+    fun toggleShuffle() = playerController.toggleShuffle()
+    fun setRepeatMode(repeatMode: Int) = playerController.setRepeatMode(repeatMode)
+    fun cycleRepeatMode() = playerController.cycleRepeatMode()
 
     fun playTrack(track: AudioTrack) {
         playerController.playTrack(track)
@@ -105,6 +108,37 @@ class MainPlayerViewModel(
                 if (radioResp.isSuccessful) {
                     _radioStations.value = radioResp.body().orEmpty()
                 }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    // Offline caching & Room DB operations
+    fun cacheTrack(track: AudioTrack) {
+        viewModelScope.launch {
+            try {
+                db.cachedTrackDao().insertTrack(
+                    CachedTrackEntity(
+                        id = track.id,
+                        title = track.title,
+                        artist = track.artist,
+                        localFilePath = null,
+                        originalUrl = track.audioUrl,
+                        durationMs = track.durationMs,
+                        cachedAtTimestamp = System.currentTimeMillis()
+                    )
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun removeCachedTrack(trackId: String) {
+        viewModelScope.launch {
+            try {
+                db.cachedTrackDao().deleteTrack(trackId)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

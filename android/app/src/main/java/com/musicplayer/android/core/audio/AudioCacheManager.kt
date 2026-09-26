@@ -45,6 +45,15 @@ object AudioCacheManager {
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
+    fun isTrackCached(context: Context, audioUrl: String): Boolean {
+        return try {
+            val cache = getCache(context)
+            cache.getCachedSpans(audioUrl).isNotEmpty()
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     @Synchronized
     fun releaseCache() {
         simpleCache?.release()

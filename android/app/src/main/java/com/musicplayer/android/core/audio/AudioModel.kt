@@ -65,5 +65,14 @@ data class PlaybackState(
     val isBuffering: Boolean = false,
     val queue: List<AudioTrack> = emptyList(),
     val hasNext: Boolean = false,
-    val hasPrevious: Boolean = false
-)
+    val hasPrevious: Boolean = false,
+    val shuffleModeEnabled: Boolean = false,
+    val repeatMode: Int = REPEAT_MODE_OFF
+) {
+    companion object {
+        const val REPEAT_MODE_OFF = 0
+        const val REPEAT_MODE_ONE = 1
+        const val REPEAT_MODE_ALL = 2
+    }
+}
+
