@@ -126,4 +126,29 @@ class NetworkSerializationTest {
         assertEquals("Gym Workout", playlists[0].name)
         assertEquals(15, playlists[0].trackCount)
     }
+
+    @Test
+    fun testAudiusTrackDtoDeserialization() {
+        val rawJson = """
+            [
+              {
+                "source": "audius",
+                "externalId": "abkvg",
+                "title": "Electronic Track",
+                "artist": "Producer One",
+                "artworkUrl": "https://example.com/cover.jpg",
+                "durationMs": 117000
+              }
+            ]
+        """.trimIndent()
+
+        val tracks = json.decodeFromString<List<com.musicplayer.android.core.network.AudiusTrackDto>>(rawJson)
+        assertEquals(1, tracks.size)
+        val track = tracks.first()
+        assertEquals("audius", track.source)
+        assertEquals("abkvg", track.externalId)
+        assertEquals("Electronic Track", track.title)
+        assertEquals("Producer One", track.artist)
+        assertEquals(117000L, track.durationMs)
+    }
 }

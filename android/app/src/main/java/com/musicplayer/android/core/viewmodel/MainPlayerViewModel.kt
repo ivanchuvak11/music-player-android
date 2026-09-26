@@ -14,6 +14,7 @@ import com.musicplayer.android.core.network.MusicApiService
 import com.musicplayer.android.core.network.NetworkClient
 import com.musicplayer.android.core.network.PlaylistSummaryDto
 import com.musicplayer.android.core.network.RadioStationDto
+import com.musicplayer.android.core.network.AudiusTrackDto
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -71,6 +72,13 @@ class MainPlayerViewModel(
         playerController.setQueue(tracks, startIndex, autoPlay = true)
     }
 
+    // Audius online music tracks
+    private val _trendingAudiusTracks = MutableStateFlow<List<AudiusTrackDto>>(emptyList())
+    val trendingAudiusTracks: StateFlow<List<AudiusTrackDto>> = _trendingAudiusTracks.asStateFlow()
+
+    private val _searchedAudiusTracks = MutableStateFlow<List<AudiusTrackDto>>(emptyList())
+    val searchedAudiusTracks: StateFlow<List<AudiusTrackDto>> = _searchedAudiusTracks.asStateFlow()
+
     fun playRadioStation(station: RadioStationDto) {
         val radioTrack = AudioTrack(
             id = "radio_${station.stationId}",
@@ -83,6 +91,21 @@ class MainPlayerViewModel(
             isLiveStream = true
         )
         playTrack(radioTrack)
+    }
+
+    fun playAudiusTrack(track: AudiusTrackDto, baseUrl: String = "http://10.0.2.2:5000") {
+        val cleanBase = baseUrl.trimEnd('/')
+        val audiusAudioTrack = AudioTrack(
+            id = "audius_${track.externalId}",
+            title = track.title,
+            artist = track.artist,
+            audioUrl = "$cleanBase/api/audius/tracks/${track.externalId}/stream",
+            artworkUrl = track.artworkUrl,
+            durationMs = track.durationMs ?: 0L,
+            isLocal = false,
+            isLiveStream = false
+        )
+        playTrack(audiusAudioTrack)
     }
 
     // Data Loading
@@ -107,6 +130,24 @@ class MainPlayerViewModel(
                 val radioResp = apiService.getFavoriteRadioStations()
                 if (radioResp.isSuccessful) {
                     _radioStations.value = radioResp.body().orEmpty()
+                }
+
+                val trendingResp = apiService.getTrendingAudiusTracks(20)
+                if (trendingResp.isSuccessful) {
+                    _trendingAudiusTracks.value = trendingResp.body().orEmpty()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun searchAudius(query: String, limit: Int = 20) {
+        viewModelScope.launch {
+            try {
+                val resp = apiService.searchAudiusTracks(query, limit)
+                if (resp.isSuccessful) {
+                    _searchedAudiusTracks.value = resp.body().orEmpty()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

@@ -79,4 +79,19 @@ interface MusicApiService {
 
     @DELETE("api/radio/favorites/{id}")
     suspend fun removeFavoriteRadioStation(@Path("id") id: Int): Response<Unit>
+
+    // Audius (Music streaming integration)
+    @GET("api/audius/search")
+    suspend fun searchAudiusTracks(
+        @Query("q") query: String,
+        @Query("limit") limit: Int = 20
+    ): Response<List<AudiusTrackDto>>
+
+    @GET("api/audius/trending")
+    suspend fun getTrendingAudiusTracks(
+        @Query("limit") limit: Int = 20
+    ): Response<List<AudiusTrackDto>>
+
+    @GET("api/audius/tracks/{id}")
+    suspend fun getAudiusTrack(@Path("id") id: String): Response<AudiusTrackDto>
 }
