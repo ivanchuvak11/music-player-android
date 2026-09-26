@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using MusicPlayer.Api.Data;
 using MusicPlayer.Api.DTOs.Auth;
 using MusicPlayer.Api.Models;
+using MusicPlayer.Api.Services;
 
 namespace MusicPlayer.Api.Controllers;
 
@@ -12,57 +13,55 @@ namespace MusicPlayer.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly JwtService _jwtService;
     private readonly PasswordHasher<User> _passwordHasher = new();
 
-    public AuthController(AppDbContext db)
+    public AuthController(
+    AppDbContext db,
+    JwtService jwtService)
     {
-        _db = db;
+    _db = db;
+    _jwtService = jwtService;
     }
 
     [HttpPost("register")]
-    public async Task<IActionResult> Register(RegisterRequest request)
+    [HttpPost("login")]
+public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
+{
+    var email = request.Email.Trim().ToLowerInvariant();
+
+    var user = await _db.Users
+        .SingleOrDefaultAsync(u => u.Email == email);
+
+    if (user is null)
     {
-        var email = request.Email.Trim().ToLowerInvariant();
-        var username = request.Username.Trim();
-
-        if (string.IsNullOrWhiteSpace(username) ||
-            string.IsNullOrWhiteSpace(email) ||
-            string.IsNullOrWhiteSpace(request.Password))
+        return Unauthorized(new
         {
-            return BadRequest(new { message = "All fields are required." });
-        }
-
-        if (request.Password.Length < 8)
-        {
-            return BadRequest(new
-            {
-                message = "Password must contain at least 8 characters."
-            });
-        }
-
-        if (await _db.Users.AnyAsync(u => u.Email == email))
-        {
-            return Conflict(new { message = "Email is already registered." });
-        }
-
-        var user = new User
-        {
-            Username = username,
-            Email = email
-        };
-
-        user.PasswordHash =
-            _passwordHasher.HashPassword(user, request.Password);
-
-        _db.Users.Add(user);
-        await _db.SaveChangesAsync();
-
-        return StatusCode(201, new
-        {
-            user.Id,
-            user.Username,
-            user.Email,
-            user.CreatedAt
+            message = "Invalid email or password."
         });
     }
+
+    var result = _passwordHasher.VerifyHashedPassword(
+        user,
+        user.PasswordHash,
+        request.Password);
+
+    if (result == PasswordVerificationResult.Failed)
+    {
+        return Unauthorized(new
+        {
+            message = "Invalid email or password."
+        });
+    }
+
+    var token = _jwtService.GenerateToken(user);
+
+    return Ok(new AuthResponse
+    {
+        Token = token,
+        UserId = user.Id,
+        Username = user.Username,
+        Email = user.Email
+    });
+}
 }
