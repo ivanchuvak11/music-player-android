@@ -8,7 +8,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,9 +17,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,13 +47,33 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
+fun PlayerCoreScreen() {
     val context = LocalContext.current
+    val app = context.applicationContext as android.app.Application
+    val viewModel: MainPlayerViewModel = viewModel(
+        factory = remember {
+            object : androidx.lifecycle.ViewModelProvider.Factory {
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                    @Suppress("UNCHECKED_CAST")
+                    return MainPlayerViewModel(app) as T
+                }
+            }
+        }
+    )
     val playbackState by viewModel.playbackState.collectAsState()
     val localTracks by viewModel.localTracks.collectAsState()
     val trendingAudius by viewModel.trendingAudiusTracks.collectAsState()
+    val searchedAudius by viewModel.searchedAudiusTracks.collectAsState()
     val radioStations by viewModel.radioStations.collectAsState()
+    val playlists by viewModel.playlists.collectAsState()
     val cachedTracks by viewModel.cachedTracks.collectAsState()
+    val currentUser by viewModel.currentUser.collectAsState()
+    val authStatus by viewModel.authStatusMessage.collectAsState()
+
+    var emailInput by remember { mutableStateOf("") }
+    var passwordInput by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
+    var newPlaylistName by remember { mutableStateOf("") }
 
     // Permission launcher for scanning local audio
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -83,13 +102,13 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
                 color = MaterialTheme.colorScheme.primary
             )
             Text(
-                text = "Функціональна панель тестування Core & Audio Engine",
+                text = "Повна функціональна панель: плеєр, авторизація, радіо, база Room",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
-        // Active Player Card
+        // Active Player Card with Seek Bar
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -118,7 +137,21 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Interactive Seek Slider
+                    if (playbackState.durationMs > 0L) {
+                        Slider(
+                            value = playbackState.currentPositionMs.toFloat().coerceIn(0f, playbackState.durationMs.toFloat()),
+                            valueRange = 0f..playbackState.durationMs.toFloat(),
+                            onValueChange = { newPos ->
+                                viewModel.seekTo(newPos.toLong())
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
 
                     // Status and Timing
                     Row(
@@ -191,6 +224,105 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
             }
         }
 
+        // Section: Authentication & Account (Вхід / Реєстрація)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "🔐 Акаунт та Авторизація (JWT)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    if (currentUser != null) {
+                        Text(
+                            text = "✅ Ви увійшли як: $currentUser",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedButton(onClick = { viewModel.logout() }) {
+                            Text("🚪 Вийти з акаунту")
+                        }
+                    } else {
+                        OutlinedTextField(
+                            value = emailInput,
+                            onValueChange = { emailInput = it },
+                            label = { Text("Email або Username") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedTextField(
+                            value = passwordInput,
+                            onValueChange = { passwordInput = it },
+                            label = { Text("Пароль") },
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    if (emailInput.isNotBlank() && passwordInput.isNotBlank()) {
+                                        viewModel.login(emailInput.trim(), passwordInput.trim())
+                                    } else {
+                                        Toast.makeText(context, "Введіть email та пароль", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) {
+                                Text("🔑 Увійти")
+                            }
+                            OutlinedButton(
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    if (emailInput.isNotBlank() && passwordInput.isNotBlank()) {
+                                        val uname = emailInput.substringBefore("@")
+                                        viewModel.register(uname, emailInput.trim(), passwordInput.trim())
+                                    } else {
+                                        Toast.makeText(context, "Введіть email та пароль", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            ) {
+                                Text("📝 Реєстрація")
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                emailInput = "ivan@example.com"
+                                passwordInput = "Test12345"
+                            }
+                        ) {
+                            Text("⚡ Вставити демо-дані з API.md")
+                        }
+                    }
+
+                    if (!authStatus.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = authStatus.orEmpty(),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                }
+            }
+        }
+
         // Quick Audio Engine Test Streams
         item {
             Card(
@@ -199,7 +331,7 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "⚡ Прямий тест онлайн-потоків (перевірка звуку):",
+                        text = "⚡ Прямий тест звуку (радіо та mp3):",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
@@ -247,7 +379,7 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
             }
         }
 
-        // Section: Local Tracks Scanner
+        // Section: Local Tracks Scanner (with voice note filter)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -255,11 +387,16 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "📱 Локальні пісні з пам'яті телефону (MediaStore):",
+                        text = "📱 Локальні пісні з пам'яті (фільтр голосових увімкнено):",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Голосові з Telegram, WhatsApp, диктофона та звуки <20с автоматично відфільтровано",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
@@ -271,22 +408,22 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
                             permissionLauncher.launch(perm)
                         }
                     ) {
-                        Text("🔍 Сканувати пісні на телефоні")
+                        Text("🔍 Сканувати музику на телефоні")
                     }
                 }
             }
         }
 
-        // List of found local tracks
+        // List of found local tracks (All items)
         if (localTracks.isNotEmpty()) {
             item {
                 Text(
-                    text = "Знайдено ${localTracks.size} пісень:",
+                    text = "Знайдено музичних треків: ${localTracks.size}",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp
                 )
             }
-            items(localTracks.take(15)) { track ->
+            items(localTracks) { track ->
                 TrackItemRow(
                     track = track,
                     onPlay = { viewModel.playTrack(track) },
@@ -341,7 +478,7 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
             )
         }
 
-        // Section: Backend Data (Audius & Radio)
+        // Section: Audius Search (Пошук онлайн-музики)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -349,34 +486,46 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "🌐 Онлайн бекенд (Audius & Радіо):",
+                        text = "🔍 Пошук треків в Audius:",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    Button(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            viewModel.loadBackendData()
-                            Toast.makeText(context, "Завантаження даних із бекенду...", Toast.LENGTH_SHORT).show()
-                        }
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("🔄 Завантажити дані з бекенду")
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Пошук пісні/артиста...") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (searchQuery.isNotBlank()) {
+                                    viewModel.searchAudius(searchQuery.trim())
+                                }
+                            }
+                        ) {
+                            Text("Пошук")
+                        }
                     }
                 }
             }
         }
 
-        // List of Audius tracks if loaded
-        if (trendingAudius.isNotEmpty()) {
+        if (searchedAudius.isNotEmpty()) {
             item {
                 Text(
-                    text = "Тренди Audius (${trendingAudius.size}):",
+                    text = "Результати пошуку (${searchedAudius.size}):",
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp
                 )
             }
-            items(trendingAudius.take(10)) { audiusTrack ->
+            items(searchedAudius) { audiusTrack ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -399,7 +548,120 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
             }
         }
 
-        // List of Radio stations if loaded
+        // Section: Backend Data & Playlists
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "🌐 Бекенд плейлісти та онлайн-радіо:",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            viewModel.loadBackendData()
+                            Toast.makeText(context, "Завантаження даних із бекенду...", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Text("🔄 Оновити дані з бекенду")
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = newPlaylistName,
+                            onValueChange = { newPlaylistName = it },
+                            placeholder = { Text("Назва нового плейліста") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (newPlaylistName.isNotBlank()) {
+                                    viewModel.createPlaylist(newPlaylistName.trim())
+                                    newPlaylistName = ""
+                                    Toast.makeText(context, "Плейліст створюється...", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        ) {
+                            Text("➕")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Playlists list
+        if (playlists.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Мої плейлісти (${playlists.size}):",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+            }
+            items(playlists) { pl ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "📁 ${pl.name} (${pl.trackCount} треків)",
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Audius Trending
+        if (trendingAudius.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Тренди Audius (${trendingAudius.size}):",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+            }
+            items(trendingAudius) { audiusTrack ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.playAudiusTrack(audiusTrack) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = audiusTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
+                            Text(text = audiusTrack.artist, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Button(onClick = { viewModel.playAudiusTrack(audiusTrack) }) {
+                            Text("▶")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Radio stations list
         if (radioStations.isNotEmpty()) {
             item {
                 Text(
@@ -408,7 +670,7 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
                     fontSize = 14.sp
                 )
             }
-            items(radioStations.take(5)) { station ->
+            items(radioStations) { station ->
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -432,7 +694,7 @@ fun PlayerCoreScreen(viewModel: MainPlayerViewModel = viewModel()) {
         }
 
         item {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }
