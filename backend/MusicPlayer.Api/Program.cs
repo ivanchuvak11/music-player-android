@@ -53,6 +53,12 @@ builder.Services
         "MusicPlayerAndroid/1.0");
 });
 
+builder.Services.AddHttpClient<AudiusService>(client =>
+{
+    client.BaseAddress = new Uri("https://api.audius.co/v1/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+
 builder.Services.AddAuthorization();
 
 builder.Services.AddScoped<JwtService>();

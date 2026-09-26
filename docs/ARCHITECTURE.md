@@ -1,4 +1,4 @@
-# Music Player Architecture
+﻿# Music Player Architecture
 
 ## Stack
 
@@ -19,7 +19,7 @@
 
 ## Music Sources
 
-- SoundCloud
+- Audius
 - YouTube / YouTube Music
 - Internet Radio
 - Local Music
