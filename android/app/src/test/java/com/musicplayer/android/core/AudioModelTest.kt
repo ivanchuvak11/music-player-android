@@ -116,4 +116,20 @@ class AudioModelTest {
         assertTrue(playingState.hasNext)
         assertFalse(playingState.hasPrevious)
     }
+
+    @Test
+    fun testShuffleAndRepeatModes() {
+        val state = PlaybackState()
+        assertFalse(state.shuffleModeEnabled)
+        assertEquals(PlaybackState.REPEAT_MODE_OFF, state.repeatMode)
+
+        val shuffledState = state.copy(shuffleModeEnabled = true)
+        assertTrue(shuffledState.shuffleModeEnabled)
+
+        val repeatOneState = state.copy(repeatMode = PlaybackState.REPEAT_MODE_ONE)
+        assertEquals(PlaybackState.REPEAT_MODE_ONE, repeatOneState.repeatMode)
+
+        val repeatAllState = state.copy(repeatMode = PlaybackState.REPEAT_MODE_ALL)
+        assertEquals(PlaybackState.REPEAT_MODE_ALL, repeatAllState.repeatMode)
+    }
 }

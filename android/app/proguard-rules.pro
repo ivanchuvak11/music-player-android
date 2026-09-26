@@ -15,6 +15,7 @@
 -keepclasseswithmembers class * {
     kotlinx.serialization.KSerializer serializer(...);
 }
+-keep @kotlinx.serialization.Serializable class * { *; }
 
 # Media3 / ExoPlayer
 -keep class androidx.media3.** { *; }

@@ -71,6 +71,14 @@ class PlayerControllerImpl(
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateState()
             }
+
+            override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                updateState()
+            }
+
+            override fun onRepeatModeChanged(repeatMode: Int) {
+                updateState()
+            }
         })
     }
 
@@ -105,6 +113,12 @@ class PlayerControllerImpl(
                 ?: AudioTrack.fromMediaItem(item, controller.duration.coerceAtLeast(0L))
         }
 
+        val mappedRepeatMode = when (controller.repeatMode) {
+            Player.REPEAT_MODE_ONE -> PlaybackState.REPEAT_MODE_ONE
+            Player.REPEAT_MODE_ALL -> PlaybackState.REPEAT_MODE_ALL
+            else -> PlaybackState.REPEAT_MODE_OFF
+        }
+
         _playbackState.value = _playbackState.value.copy(
             currentTrack = currentTrack,
             isPlaying = controller.isPlaying,
@@ -113,7 +127,9 @@ class PlayerControllerImpl(
             isBuffering = controller.playbackState == Player.STATE_BUFFERING,
             queue = currentQueue,
             hasNext = controller.hasNextMediaItem(),
-            hasPrevious = controller.hasPreviousMediaItem()
+            hasPrevious = controller.hasPreviousMediaItem(),
+            shuffleModeEnabled = controller.shuffleModeEnabled,
+            repeatMode = mappedRepeatMode
         )
     }
 
@@ -153,6 +169,31 @@ class PlayerControllerImpl(
 
     override fun playTrack(track: AudioTrack) {
         setQueue(listOf(track), startIndex = 0, autoPlay = true)
+    }
+
+    override fun toggleShuffle() {
+        val controller = mediaController ?: return
+        controller.shuffleModeEnabled = !controller.shuffleModeEnabled
+        updateState()
+    }
+
+    override fun setRepeatMode(repeatMode: Int) {
+        val controller = mediaController ?: return
+        controller.repeatMode = when (repeatMode) {
+            PlaybackState.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE
+            PlaybackState.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ALL
+            else -> Player.REPEAT_MODE_OFF
+        }
+        updateState()
+    }
+
+    override fun cycleRepeatMode() {
+        val nextMode = when (_playbackState.value.repeatMode) {
+            PlaybackState.REPEAT_MODE_OFF -> PlaybackState.REPEAT_MODE_ALL
+            PlaybackState.REPEAT_MODE_ALL -> PlaybackState.REPEAT_MODE_ONE
+            else -> PlaybackState.REPEAT_MODE_OFF
+        }
+        setRepeatMode(nextMode)
     }
 
     override fun release() {

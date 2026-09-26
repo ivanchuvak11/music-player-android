@@ -129,3 +129,13 @@ data class AddFavoriteRadioRequestDto(
     val country: String? = null,
     val genre: String? = null
 )
+
+@Serializable
+data class AudiusTrackDto(
+    val source: String = "audius",
+    val externalId: String,
+    val title: String,
+    val artist: String,
+    val artworkUrl: String? = null,
+    val durationMs: Long? = 0L
+)
