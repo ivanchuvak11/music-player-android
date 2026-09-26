@@ -44,6 +44,15 @@ builder.Services
         };
     });
 
+    builder.Services.AddHttpClient<RadioBrowserService>(client =>
+{
+    client.BaseAddress =
+        new Uri("https://de1.api.radio-browser.info/");
+
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "MusicPlayerAndroid/1.0");
+});
+
 builder.Services.AddAuthorization();
 
 builder.Services.AddScoped<JwtService>();
@@ -89,3 +98,5 @@ record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
 {
     public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
 }
+
+
