@@ -1,9 +1,8 @@
-namespace MusicPlayer.Api.DTOs.Playlists;
+namespace MusicPlayer.Api.DTOs.Audius;
 
-public class AddTrackRequest
+public class AudiusTrackDto
 {
-    // "Audius" або "youtube"
-    public string Source { get; set; } = string.Empty;
+    public string Source { get; set; } = "audius";
     public string ExternalId { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Artist { get; set; } = string.Empty;

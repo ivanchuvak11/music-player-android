@@ -1,10 +1,10 @@
-# Music Player Android
+﻿# Music Player Android
 
 Android music player supporting multiple music sources.
 
 ## Sources
 
-- SoundCloud
+- Audius
 - YouTube / YouTube Music
 - Internet Radio
 - Local Music

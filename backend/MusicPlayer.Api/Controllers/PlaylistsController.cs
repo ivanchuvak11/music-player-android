@@ -163,12 +163,12 @@ public class PlaylistsController : ControllerBase
             .Trim()
             .ToLowerInvariant();
 
-        if (source != "soundcloud" &&
+        if (source != "audius" &&
             source != "youtube")
         {
             return BadRequest(new
             {
-                message = "Source must be soundcloud or youtube."
+                message = "Source must be audius or youtube."
             });
         }
 

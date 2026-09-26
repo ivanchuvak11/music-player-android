@@ -1,18 +1,18 @@
-# Music Player REST API
+﻿# Music Player REST API
 
-Backend REST API for the Music Player Android application.
+REST API бекенду для Android-застосунку **Music Player**.
 
-## Base URL
+## Базова URL-адреса
 
-Development:
+Під час локальної розробки:
 
 ```text
 http://localhost:5116/api
 ```
 
-Most endpoints require JWT authentication.
+Більшість endpoint'ів потребують JWT-авторизації.
 
-For protected endpoints send:
+Для захищених запитів необхідно передавати токен у заголовку:
 
 ```http
 Authorization: Bearer <token>
@@ -20,17 +20,17 @@ Authorization: Bearer <token>
 
 ---
 
-# Authentication
+# Авторизація
 
-## Register
+## Реєстрація
 
-Creates a new user account.
+Створює новий обліковий запис користувача.
 
 ```http
 POST /api/auth/register
 ```
 
-### Request
+### Запит
 
 ```json
 {
@@ -40,7 +40,7 @@ POST /api/auth/register
 }
 ```
 
-### Response
+### Відповідь
 
 ```json
 {
@@ -53,15 +53,15 @@ POST /api/auth/register
 
 ---
 
-## Login
+## Вхід
 
-Authenticates a user and returns a JWT token.
+Виконує авторизацію користувача та повертає JWT-токен.
 
 ```http
 POST /api/auth/login
 ```
 
-### Request
+### Запит
 
 ```json
 {
@@ -70,7 +70,7 @@ POST /api/auth/login
 }
 ```
 
-### Response
+### Відповідь
 
 ```json
 {
@@ -81,23 +81,23 @@ POST /api/auth/login
 }
 ```
 
-The Android application should use the returned token for protected API requests.
+Android-застосунок повинен використовувати отриманий токен для всіх захищених запитів до API.
 
 ---
 
-# User
+# Користувач
 
-## Get Current User
+## Отримання поточного користувача
 
-Returns the currently authenticated user.
+Повертає інформацію про авторизованого користувача.
 
 ```http
 GET /api/users/me
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-### Response
+### Відповідь
 
 ```json
 {
@@ -110,17 +110,134 @@ Authentication required.
 
 ---
 
-# Playlists
+# Audius
 
-## Get User Playlists
+Audius використовується як основне зовнішнє джерело музичних треків.
+
+Усі Audius endpoint'и потребують JWT-авторизації.
+
+## Пошук треків
+
+Виконує пошук музичних треків через Audius.
+
+```http
+GET /api/audius/search?q={query}&limit={limit}
+```
+
+### Приклад
+
+```http
+GET /api/audius/search?q=electronic&limit=10
+```
+
+### Відповідь
+
+```json
+[
+  {
+    "source": "audius",
+    "externalId": "abkvg",
+    "title": "Electronic Butterflies",
+    "artist": "Seb Park",
+    "artworkUrl": "https://example.com/cover.jpg",
+    "durationMs": 117000
+  }
+]
+```
+
+---
+
+## Популярні треки
+
+Повертає список популярних треків Audius.
+
+```http
+GET /api/audius/trending?limit={limit}
+```
+
+### Приклад
+
+```http
+GET /api/audius/trending?limit=10
+```
+
+### Відповідь
+
+```json
+[
+  {
+    "source": "audius",
+    "externalId": "track-id",
+    "title": "Example Track",
+    "artist": "Example Artist",
+    "artworkUrl": "https://example.com/cover.jpg",
+    "durationMs": 215000
+  }
+]
+```
+
+---
+
+## Отримання інформації про трек
+
+Повертає інформацію про конкретний трек Audius.
+
+```http
+GET /api/audius/tracks/{id}
+```
+
+### Приклад
+
+```http
+GET /api/audius/tracks/abkvg
+```
+
+### Відповідь
+
+```json
+{
+  "source": "audius",
+  "externalId": "abkvg",
+  "title": "Electronic Butterflies",
+  "artist": "Seb Park",
+  "artworkUrl": "https://example.com/cover.jpg",
+  "durationMs": 117000
+}
+```
+
+---
+
+## Відтворення треку
+
+Повертає аудіопотік треку Audius через бекенд.
+
+```http
+GET /api/audius/tracks/{id}/stream
+```
+
+### Приклад
+
+```http
+GET /api/audius/tracks/abkvg/stream
+```
+
+У разі успішного запиту бекенд повертає аудіопотік треку.
+
+Android-застосунок може використовувати цей endpoint як джерело аудіо для Media3/ExoPlayer.
+
+---
+
+# Плейлисти
+
+## Отримання плейлистів користувача
 
 ```http
 GET /api/playlists
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-### Response
+### Відповідь
 
 ```json
 [
@@ -135,21 +252,21 @@ Authentication required.
 
 ---
 
-## Get Playlist
+## Отримання плейлиста
 
 ```http
 GET /api/playlists/{id}
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-### Example
+### Приклад
 
 ```http
 GET /api/playlists/1
 ```
 
-### Response
+### Відповідь
 
 ```json
 {
@@ -158,13 +275,13 @@ GET /api/playlists/1
   "createdAt": "2026-09-26T10:00:00Z",
   "tracks": [
     {
-      "id": 1,
-      "source": "soundcloud",
-      "externalId": "123456",
-      "title": "Example Track",
-      "artist": "Example Artist",
+      "id": 2,
+      "source": "audius",
+      "externalId": "abkvg",
+      "title": "Electronic Butterflies",
+      "artist": "Seb Park",
       "artworkUrl": "https://example.com/cover.jpg",
-      "durationMs": 215000,
+      "durationMs": 117000,
       "addedAt": "2026-09-26T10:05:00Z"
     }
   ]
@@ -173,15 +290,15 @@ GET /api/playlists/1
 
 ---
 
-## Create Playlist
+## Створення плейлиста
 
 ```http
 POST /api/playlists
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-### Request
+### Запит
 
 ```json
 {
@@ -189,47 +306,74 @@ Authentication required.
 }
 ```
 
+### Відповідь
+
+```json
+{
+  "id": 1,
+  "name": "My Favorites",
+  "createdAt": "2026-09-26T10:00:00Z"
+}
+```
+
 ---
 
-## Add Track to Playlist
+## Додавання треку до плейлиста
 
 ```http
 POST /api/playlists/{playlistId}/tracks
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-Supported track sources:
+Підтримувані джерела треків:
 
 ```text
-soundcloud
+audius
 youtube
 ```
 
-### Request
+### Запит
 
 ```json
 {
-  "source": "soundcloud",
-  "externalId": "123456",
-  "title": "Example Track",
-  "artist": "Example Artist",
+  "source": "audius",
+  "externalId": "abkvg",
+  "title": "Electronic Butterflies",
+  "artist": "Seb Park",
   "artworkUrl": "https://example.com/cover.jpg",
-  "durationMs": 215000
+  "durationMs": 117000
 }
 ```
 
+### Відповідь
+
+```json
+{
+  "id": 2,
+  "source": "audius",
+  "externalId": "abkvg",
+  "title": "Electronic Butterflies",
+  "artist": "Seb Park",
+  "artworkUrl": "https://example.com/cover.jpg",
+  "durationMs": 117000,
+  "addedAt": "2026-09-26T10:05:00Z"
+}
+```
+
+Один і той самий трек не може бути двічі доданий до одного плейлиста.
+
 ---
 
-## Remove Track from Playlist
+## Видалення треку з плейлиста
 
 ```http
 DELETE /api/playlists/{playlistId}/tracks/{trackId}
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-Successful response:
+У разі успішного видалення:
 
 ```text
 204 No Content
@@ -237,15 +381,15 @@ Successful response:
 
 ---
 
-## Delete Playlist
+## Видалення плейлиста
 
 ```http
 DELETE /api/playlists/{id}
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-Successful response:
+У разі успішного видалення:
 
 ```text
 204 No Content
@@ -253,57 +397,76 @@ Successful response:
 
 ---
 
-# Favorite Tracks
+# Улюблені треки
 
-Favorite tracks can currently reference:
+Улюблені треки можуть посилатися на такі джерела:
 
 ```text
-soundcloud
+audius
 youtube
 ```
 
-## Get Favorite Tracks
+## Отримання улюблених треків
 
 ```http
 GET /api/favorites/tracks
 ```
 
-Authentication required.
+Потрібна авторизація.
+
+### Відповідь
+
+```json
+[
+  {
+    "id": 2,
+    "source": "audius",
+    "externalId": "abkvg",
+    "title": "Electronic Butterflies",
+    "artist": "Seb Park",
+    "artworkUrl": "https://example.com/cover.jpg",
+    "durationMs": 117000,
+    "createdAt": "2026-09-26T10:05:00Z"
+  }
+]
+```
 
 ---
 
-## Add Favorite Track
+## Додавання треку до улюблених
 
 ```http
 POST /api/favorites/tracks
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-### Request
+### Запит
 
 ```json
 {
-  "source": "youtube",
-  "externalId": "video-id",
-  "title": "Example Track",
-  "artist": "Example Artist",
+  "source": "audius",
+  "externalId": "abkvg",
+  "title": "Electronic Butterflies",
+  "artist": "Seb Park",
   "artworkUrl": "https://example.com/cover.jpg",
-  "durationMs": 180000
+  "durationMs": 117000
 }
 ```
 
+Один і той самий трек не може бути доданий до улюблених одного користувача двічі.
+
 ---
 
-## Remove Favorite Track
+## Видалення треку з улюблених
 
 ```http
 DELETE /api/favorites/tracks/{id}
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-Successful response:
+У разі успішного видалення:
 
 ```text
 204 No Content
@@ -311,25 +474,27 @@ Successful response:
 
 ---
 
-# Radio
+# Радіо
 
-Radio station data is provided by Radio Browser.
+Дані про інтернет-радіостанції отримуються через Radio Browser API.
 
-## Search Radio Stations
+Радіостанції обробляються окремо від звичайних музичних треків.
+
+## Пошук радіостанцій
 
 ```http
 GET /api/radio/search?q={query}&limit={limit}
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-### Example
+### Приклад
 
 ```http
 GET /api/radio/search?q=rock&limit=10
 ```
 
-### Response
+### Відповідь
 
 ```json
 [
@@ -349,45 +514,45 @@ GET /api/radio/search?q=rock&limit=10
 
 ---
 
-## Get Popular Radio Stations
+## Отримання популярних радіостанцій
 
 ```http
 GET /api/radio/popular?limit={limit}
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-### Example
+### Приклад
 
 ```http
 GET /api/radio/popular?limit=10
 ```
 
-Returns popular radio stations ordered using Radio Browser popularity data.
+Повертає список популярних радіостанцій на основі даних Radio Browser.
 
 ---
 
-## Get Favorite Radio Stations
+## Отримання улюблених радіостанцій
 
 ```http
 GET /api/radio/favorites
 ```
 
-Authentication required.
+Потрібна авторизація.
 
 ---
 
-## Add Favorite Radio Station
+## Додавання радіостанції до улюблених
 
 ```http
 POST /api/radio/favorites
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-Only the Radio Browser station UUID is required.
+Для додавання достатньо передати UUID станції Radio Browser.
 
-### Request
+### Запит
 
 ```json
 {
@@ -395,19 +560,19 @@ Only the Radio Browser station UUID is required.
 }
 ```
 
-The backend retrieves the current station metadata from Radio Browser before storing the favorite.
+Бекенд самостійно отримує актуальні метадані станції через Radio Browser перед збереженням у базу даних.
 
 ---
 
-## Remove Favorite Radio Station
+## Видалення радіостанції з улюблених
 
 ```http
 DELETE /api/radio/favorites/{id}
 ```
 
-Authentication required.
+Потрібна авторизація.
 
-Successful response:
+У разі успішного видалення:
 
 ```text
 204 No Content
@@ -415,44 +580,83 @@ Successful response:
 
 ---
 
-# Track Sources
+# Джерела музики
 
-The backend currently supports the following remote track source identifiers:
+Бекенд використовує такі ідентифікатори зовнішніх джерел музики:
 
-| Source | Value |
-|---|---|
-| SoundCloud | `soundcloud` |
-| YouTube / YouTube Music | `youtube` |
+| Джерело | Значення | Стан |
+|---|---|---|
+| Audius | `audius` | Реалізовано |
+| YouTube | `youtube` | Заплановано |
 
-Radio stations are handled separately through the `/api/radio` endpoints.
+## Audius
 
-Local music files are handled directly by the Android application and are not stored in the backend music library.
+Audius використовується для:
+
+- пошуку музики;
+- отримання популярних треків;
+- отримання метаданих треку;
+- отримання аудіопотоку;
+- збереження треків у плейлистах;
+- збереження треків в улюблених.
+
+## YouTube
+
+Інтеграція YouTube планується окремо.
+
+Для YouTube буде використовуватися офіційний механізм відтворення YouTube. YouTube не розглядається як пряме джерело аудіопотоку для Media3.
+
+## Локальна музика
+
+Локальні музичні файли обробляються безпосередньо Android-застосунком.
+
+Для роботи з локальною музикою планується використання Android MediaStore та локальної бази Room.
+
+Самі локальні аудіофайли не зберігаються у PostgreSQL на бекенді.
+
+## Радіо
+
+Радіостанції обробляються окремо через:
+
+```text
+/api/radio
+```
 
 ---
 
-# HTTP Status Codes
+# HTTP-коди відповідей
 
-| Status | Meaning |
+| Код | Значення |
 |---|---|
-| `200 OK` | Request completed successfully |
-| `201 Created` | Resource created successfully |
-| `204 No Content` | Resource deleted successfully |
-| `400 Bad Request` | Invalid request |
-| `401 Unauthorized` | Missing or invalid authentication |
-| `404 Not Found` | Resource was not found |
-| `409 Conflict` | Resource already exists |
+| `200 OK` | Запит успішно виконано |
+| `201 Created` | Ресурс успішно створено |
+| `204 No Content` | Операцію виконано, тіло відповіді відсутнє |
+| `400 Bad Request` | Некоректний запит |
+| `401 Unauthorized` | JWT-токен відсутній або недійсний |
+| `404 Not Found` | Ресурс не знайдено |
+| `409 Conflict` | Ресурс уже існує або виник конфлікт |
 
 ---
 
-# Backend Stack
+# Технології бекенду
 
-- ASP.NET Core 10
-- PostgreSQL
-- Entity Framework Core
-- JWT authentication
-- Radio Browser API
+На поточному етапі використовуються:
 
-## Planned Integrations
+- ASP.NET Core 10;
+- PostgreSQL;
+- Entity Framework Core;
+- JWT Authentication;
+- Audius API;
+- Radio Browser API.
 
-- SoundCloud
-- YouTube / YouTube Music
+---
+
+# Заплановані інтеграції
+
+Наступні можливості ще не є частиною завершеного API:
+
+- інтеграція YouTube;
+- кешування даних;
+- Redis;
+- додаткове покращення потокового відтворення;
+- підтримка Android-клієнта через Retrofit та Media3/ExoPlayer.
