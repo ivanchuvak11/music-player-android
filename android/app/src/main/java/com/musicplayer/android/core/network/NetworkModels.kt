@@ -18,7 +18,9 @@ data class LoginRequestDto(
 @Serializable
 data class AuthResponseDto(
     val token: String,
-    val username: String
+    val userId: Int? = null,
+    val username: String? = null,
+    val email: String? = null
 )
 
 @Serializable
@@ -26,36 +28,38 @@ data class UserDto(
     val id: Int,
     val username: String,
     val email: String,
-    val createdAt: String
+    val createdAt: String? = null
 )
 
 @Serializable
 data class PlaylistSummaryDto(
     val id: Int,
     val name: String,
-    val createdAt: String,
-    val trackCount: Int
+    val createdAt: String? = null,
+    val trackCount: Int = 0
 )
 
 @Serializable
 data class PlaylistDetailDto(
     val id: Int,
     val name: String,
-    val createdAt: String,
-    val tracks: List<PlaylistTrackDto>
+    val createdAt: String? = null,
+    val tracks: List<PlaylistTrackDto> = emptyList()
 )
 
 @Serializable
 data class PlaylistTrackDto(
     val id: Int,
-    val trackId: String,
+    val source: String? = null,
+    val externalId: String? = null,
+    val trackId: String? = null,
     val title: String,
     val artist: String,
-    val audioUrl: String,
+    val audioUrl: String? = null,
     val artworkUrl: String? = null,
     val durationMs: Long? = 0L,
-    val source: String? = null,
-    val position: Int
+    val position: Int? = 0,
+    val addedAt: String? = null
 )
 
 @Serializable
@@ -65,56 +69,62 @@ data class CreatePlaylistRequestDto(
 
 @Serializable
 data class AddTrackToPlaylistRequestDto(
-    val trackId: String,
+    val source: String = "soundcloud",
+    val externalId: String,
     val title: String,
     val artist: String,
-    val audioUrl: String,
     val artworkUrl: String? = null,
     val durationMs: Long? = 0L,
-    val source: String? = null
+    val trackId: String? = null,
+    val audioUrl: String? = null
 )
 
 @Serializable
 data class FavoriteTrackDto(
     val id: Int,
-    val trackId: String,
+    val source: String? = null,
+    val externalId: String? = null,
+    val trackId: String? = null,
     val title: String,
     val artist: String,
-    val audioUrl: String,
+    val audioUrl: String? = null,
     val artworkUrl: String? = null,
     val durationMs: Long? = 0L,
-    val source: String? = null,
-    val createdAt: String
+    val createdAt: String? = null
 )
 
 @Serializable
 data class AddFavoriteTrackRequestDto(
-    val trackId: String,
+    val source: String = "youtube",
+    val externalId: String,
     val title: String,
     val artist: String,
-    val audioUrl: String,
     val artworkUrl: String? = null,
     val durationMs: Long? = 0L,
-    val source: String? = null
+    val trackId: String? = null,
+    val audioUrl: String? = null
 )
 
 @Serializable
 data class RadioStationDto(
-    val id: Int,
+    val id: Int? = null,
     val stationId: String,
     val name: String,
     val streamUrl: String,
     val logoUrl: String? = null,
     val country: String? = null,
+    val countryCode: String? = null,
     val genre: String? = null,
-    val createdAt: String
+    val codec: String? = null,
+    val bitrate: Int? = null,
+    val createdAt: String? = null
 )
 
 @Serializable
 data class AddFavoriteRadioRequestDto(
     val stationId: String,
-    val name: String,
-    val streamUrl: String,
+    val name: String? = null,
+    val streamUrl: String? = null,
     val logoUrl: String? = null,
     val country: String? = null,
     val genre: String? = null
