@@ -44,7 +44,7 @@ builder.Services
         };
     });
 
-    builder.Services.AddHttpClient<RadioBrowserService>(client =>
+builder.Services.AddHttpClient<RadioBrowserService>(client =>
 {
     client.BaseAddress =
         new Uri("https://de1.api.radio-browser.info/");
@@ -59,18 +59,20 @@ builder.Services.AddHttpClient<AudiusService>(client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration =
+        builder.Configuration.GetConnectionString("Redis")
+        ?? "localhost:6379";
+    options.InstanceName = "MusicPlayer:";
+});
+
 builder.Services.AddAuthorization();
 
 builder.Services.AddScoped<JwtService>();
+builder.Services.AddScoped<CacheService>();
 
 var app = builder.Build();
-
-app.MapControllers();
-
-app.UseAuthentication();
-app.UseAuthorization();
-
-app.MapControllers();
 
 if (app.Environment.IsDevelopment())
 {
@@ -79,30 +81,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+app.UseAuthentication();
+app.UseAuthorization();
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+app.MapControllers();
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
-
-

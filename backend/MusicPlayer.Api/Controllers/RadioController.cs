@@ -16,14 +16,14 @@ public class RadioController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly RadioBrowserService _radioBrowser;
- 
+
     public RadioController(
-    AppDbContext db,
-    RadioBrowserService radioBrowser)
-{
-    _db = db;
-    _radioBrowser = radioBrowser;
-}
+        AppDbContext db,
+        RadioBrowserService radioBrowser)
+    {
+        _db = db;
+        _radioBrowser = radioBrowser;
+    }
 
     private int? GetCurrentUserId()
     {
@@ -32,6 +32,85 @@ public class RadioController : ControllerBase
         return int.TryParse(value, out var userId)
             ? userId
             : null;
+    }
+
+    // GET /api/radio/search?q=rock&countryCode=UA&genre=jazz
+    [HttpGet("search")]
+    public async Task<IActionResult> Search(
+        [FromQuery] string? q,
+        [FromQuery] string? countryCode,
+        [FromQuery] string? genre,
+        [FromQuery] int limit = 20)
+    {
+        if (string.IsNullOrWhiteSpace(q) &&
+            string.IsNullOrWhiteSpace(countryCode) &&
+            string.IsNullOrWhiteSpace(genre))
+        {
+            return BadRequest(new
+            {
+                message = "Search query, countryCode or genre is required."
+            });
+        }
+
+        var stations = await _radioBrowser.SearchAsync(
+            q ?? string.Empty,
+            countryCode,
+            genre,
+            limit);
+
+        return Ok(ToRadioStationResponse(stations));
+    }
+
+    // GET /api/radio/popular?limit=20
+    [HttpGet("popular")]
+    public async Task<IActionResult> GetPopular(
+        [FromQuery] int limit = 20)
+    {
+        var stations = await _radioBrowser.GetPopularAsync(limit);
+
+        return Ok(ToRadioStationResponse(stations));
+    }
+
+    // GET /api/radio/by-country/UA?limit=20
+    [HttpGet("by-country/{countryCode}")]
+    public async Task<IActionResult> GetByCountry(
+        string countryCode,
+        [FromQuery] int limit = 20)
+    {
+        if (string.IsNullOrWhiteSpace(countryCode))
+        {
+            return BadRequest(new
+            {
+                message = "Country code is required."
+            });
+        }
+
+        var stations = await _radioBrowser.GetByCountryAsync(
+            countryCode,
+            limit);
+
+        return Ok(ToRadioStationResponse(stations));
+    }
+
+    // GET /api/radio/by-genre/jazz?limit=20
+    [HttpGet("by-genre/{genre}")]
+    public async Task<IActionResult> GetByGenre(
+        string genre,
+        [FromQuery] int limit = 20)
+    {
+        if (string.IsNullOrWhiteSpace(genre))
+        {
+            return BadRequest(new
+            {
+                message = "Genre is required."
+            });
+        }
+
+        var stations = await _radioBrowser.GetByGenreAsync(
+            genre,
+            limit);
+
+        return Ok(ToRadioStationResponse(stations));
     }
 
     // GET /api/radio/favorites
@@ -65,75 +144,75 @@ public class RadioController : ControllerBase
 
     // POST /api/radio/favorites
     [HttpPost("favorites")]
-public async Task<IActionResult> AddFavorite(
-    AddFavoriteRadioRequest request)
-{
-    var userId = GetCurrentUserId();
-
-    if (userId is null)
-        return Unauthorized();
-
-    var stationId = request.StationId.Trim();
-
-    if (string.IsNullOrWhiteSpace(stationId))
+    public async Task<IActionResult> AddFavorite(
+        AddFavoriteRadioRequest request)
     {
-        return BadRequest(new
+        var userId = GetCurrentUserId();
+
+        if (userId is null)
+            return Unauthorized();
+
+        var stationId = request.StationId.Trim();
+
+        if (string.IsNullOrWhiteSpace(stationId))
         {
-            message = "StationId is required."
+            return BadRequest(new
+            {
+                message = "StationId is required."
+            });
+        }
+
+        var exists = await _db.FavoriteRadioStations.AnyAsync(r =>
+            r.UserId == userId &&
+            r.StationId == stationId);
+
+        if (exists)
+        {
+            return Conflict(new
+            {
+                message = "Radio station is already in favorites."
+            });
+        }
+
+        var radioStation =
+            await _radioBrowser.GetByIdAsync(stationId);
+
+        if (radioStation is null ||
+            string.IsNullOrWhiteSpace(radioStation.StreamUrl))
+        {
+            return NotFound(new
+            {
+                message = "Radio station not found."
+            });
+        }
+
+        var station = new FavoriteRadioStation
+        {
+            UserId = userId.Value,
+            StationId = radioStation.StationUuid,
+            Name = radioStation.Name,
+            StreamUrl = radioStation.StreamUrl,
+            LogoUrl = radioStation.LogoUrl,
+            Country = radioStation.Country,
+            Genre = radioStation.Tags
+        };
+
+        _db.FavoriteRadioStations.Add(station);
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            station.Id,
+            station.StationId,
+            station.Name,
+            station.StreamUrl,
+            station.LogoUrl,
+            station.Country,
+            station.Genre,
+            station.CreatedAt
         });
     }
-
-    var exists = await _db.FavoriteRadioStations.AnyAsync(r =>
-        r.UserId == userId &&
-        r.StationId == stationId);
-
-    if (exists)
-    {
-        return Conflict(new
-        {
-            message = "Radio station is already in favorites."
-        });
-    }
-
-    var radioStation =
-        await _radioBrowser.GetByIdAsync(stationId);
-
-    if (radioStation is null ||
-        string.IsNullOrWhiteSpace(radioStation.StreamUrl))
-    {
-        return NotFound(new
-        {
-            message = "Radio station not found."
-        });
-    }
-
-    var station = new FavoriteRadioStation
-    {
-        UserId = userId.Value,
-        StationId = radioStation.StationUuid,
-        Name = radioStation.Name,
-        StreamUrl = radioStation.StreamUrl,
-        LogoUrl = radioStation.LogoUrl,
-        Country = radioStation.Country,
-        Genre = radioStation.Tags
-    };
-
-    _db.FavoriteRadioStations.Add(station);
-
-    await _db.SaveChangesAsync();
-
-    return Ok(new
-    {
-        station.Id,
-        station.StationId,
-        station.Name,
-        station.StreamUrl,
-        station.LogoUrl,
-        station.Country,
-        station.Genre,
-        station.CreatedAt
-    });
-}
 
     // DELETE /api/radio/favorites/5
     [HttpDelete("favorites/{id:int}")]
@@ -163,66 +242,24 @@ public async Task<IActionResult> AddFavorite(
         return NoContent();
     }
 
-    // GET /api/radio/search?q=rock
-[HttpGet("search")]
-public async Task<IActionResult> Search(
-    [FromQuery] string q,
-    [FromQuery] int limit = 20)
-{
-    if (string.IsNullOrWhiteSpace(q))
+    private static IEnumerable<object> ToRadioStationResponse(
+        IEnumerable<RadioStationDto> stations)
     {
-        return BadRequest(new
-        {
-            message = "Search query is required."
-        });
+        return stations
+            .Where(s =>
+                !string.IsNullOrWhiteSpace(s.StationUuid) &&
+                !string.IsNullOrWhiteSpace(s.StreamUrl))
+            .Select(s => new
+            {
+                StationId = s.StationUuid,
+                s.Name,
+                s.StreamUrl,
+                s.LogoUrl,
+                s.Country,
+                s.CountryCode,
+                Genre = s.Tags,
+                s.Codec,
+                s.Bitrate
+            });
     }
-
-    var stations = await _radioBrowser.SearchAsync(q, limit);
-
-    var result = stations
-        .Where(s =>
-            !string.IsNullOrWhiteSpace(s.StationUuid) &&
-            !string.IsNullOrWhiteSpace(s.StreamUrl))
-        .Select(s => new
-        {
-            StationId = s.StationUuid,
-            s.Name,
-            s.StreamUrl,
-            s.LogoUrl,
-            s.Country,
-            s.CountryCode,
-            Genre = s.Tags,
-            s.Codec,
-            s.Bitrate
-        });
-
-    return Ok(result);
-}
-
-// GET /api/radio/popular?limit=20
-[HttpGet("popular")]
-public async Task<IActionResult> GetPopular(
-    [FromQuery] int limit = 20)
-{
-    var stations = await _radioBrowser.GetPopularAsync(limit);
-
-    var result = stations
-        .Where(s =>
-            !string.IsNullOrWhiteSpace(s.StationUuid) &&
-            !string.IsNullOrWhiteSpace(s.StreamUrl))
-        .Select(s => new
-        {
-            StationId = s.StationUuid,
-            s.Name,
-            s.StreamUrl,
-            s.LogoUrl,
-            s.Country,
-            s.CountryCode,
-            Genre = s.Tags,
-            s.Codec,
-            s.Bitrate
-        });
-
-    return Ok(result);
-}
 }

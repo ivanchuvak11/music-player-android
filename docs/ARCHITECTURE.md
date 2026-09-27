@@ -15,7 +15,17 @@
 - ASP.NET Core 10
 - Entity Framework Core
 - PostgreSQL
+- Redis
 - JWT Authentication
+
+## Backend Cache
+
+Redis використовується для кешування read-only запитів до зовнішніх джерел:
+
+- Audius search/trending: 5 хвилин
+- Audius track metadata: 30 хвилин
+- Radio Browser search/popular: 10 хвилин
+- Radio Browser station metadata: 24 години
 
 ## Music Sources
 

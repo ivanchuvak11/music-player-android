@@ -483,15 +483,28 @@ DELETE /api/favorites/tracks/{id}
 ## Пошук радіостанцій
 
 ```http
-GET /api/radio/search?q={query}&limit={limit}
+GET /api/radio/search?q={query}&countryCode={countryCode}&genre={genre}&limit={limit}
 ```
 
 Потрібна авторизація.
+
+Можна передавати один або кілька фільтрів:
+
+| Параметр | Опис |
+|---|---|
+| `q` | Пошук за назвою станції |
+| `countryCode` | ISO-код країни, наприклад `UA`, `US`, `FR` |
+| `genre` | Жанр або тег, наприклад `rock`, `jazz`, `news` |
+| `limit` | Кількість станцій, від 1 до 50 |
 
 ### Приклад
 
 ```http
 GET /api/radio/search?q=rock&limit=10
+```
+
+```http
+GET /api/radio/search?countryCode=UA&genre=news&limit=10
 ```
 
 ### Відповідь
@@ -511,6 +524,42 @@ GET /api/radio/search?q=rock&limit=10
   }
 ]
 ```
+
+---
+
+## Отримання радіостанцій за країною
+
+```http
+GET /api/radio/by-country/{countryCode}?limit={limit}
+```
+
+Потрібна авторизація.
+
+### Приклад
+
+```http
+GET /api/radio/by-country/UA?limit=20
+```
+
+Повертає радіостанції з конкретної країни. Android-застосунок може використати `streamUrl` як джерело потоку для Media3/ExoPlayer.
+
+---
+
+## Отримання радіостанцій за жанром
+
+```http
+GET /api/radio/by-genre/{genre}?limit={limit}
+```
+
+Потрібна авторизація.
+
+### Приклад
+
+```http
+GET /api/radio/by-genre/jazz?limit=20
+```
+
+Повертає радіостанції за жанром або тегом. Android-застосунок може використати `streamUrl` як джерело потоку для Media3/ExoPlayer.
 
 ---
 
@@ -644,10 +693,26 @@ Audius використовується для:
 
 - ASP.NET Core 10;
 - PostgreSQL;
+- Redis;
 - Entity Framework Core;
 - JWT Authentication;
 - Audius API;
 - Radio Browser API.
+
+## Кешування
+
+Redis використовується для кешування read-only запитів до зовнішніх музичних джерел:
+
+| Дані | TTL |
+|---|---|
+| Audius search | 5 хвилин |
+| Audius trending | 5 хвилин |
+| Audius track metadata | 30 хвилин |
+| Radio Browser search | 10 хвилин |
+| Radio Browser popular | 10 хвилин |
+| Radio Browser station metadata | 24 години |
+
+Аудіопотоки не кешуються на бекенді.
 
 ---
 
@@ -656,7 +721,5 @@ Audius використовується для:
 Наступні можливості ще не є частиною завершеного API:
 
 - інтеграція YouTube;
-- кешування даних;
-- Redis;
 - додаткове покращення потокового відтворення;
 - підтримка Android-клієнта через Retrofit та Media3/ExoPlayer.

@@ -8,13 +8,16 @@ public class AudiusService
 {
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    private readonly CacheService _cache;
 
     public AudiusService(
         HttpClient httpClient,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        CacheService cache)
     {
         _httpClient = httpClient;
         _configuration = configuration;
+        _cache = cache;
     }
 
     public async Task<List<AudiusTrackDto>> SearchAsync(
@@ -28,18 +31,69 @@ public class AudiusService
 
         limit = Math.Clamp(limit, 1, 50);
 
-        var apiKey = _configuration["Audius:ApiKey"];
+        var cacheKey =
+            $"audius:search:{query.ToLowerInvariant()}:{limit}";
 
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException(
-                "Audius API key is not configured.");
+        return await _cache.GetOrCreateAsync(
+            cacheKey,
+            TimeSpan.FromMinutes(5),
+            () => FetchSearchAsync(query, limit));
+    }
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
+    public async Task<List<AudiusTrackDto>> GetTrendingAsync(
+        int limit = 20)
+    {
+        limit = Math.Clamp(limit, 1, 50);
+
+        var cacheKey = $"audius:trending:{limit}";
+
+        return await _cache.GetOrCreateAsync(
+            cacheKey,
+            TimeSpan.FromMinutes(5),
+            () => FetchTrendingAsync(limit));
+    }
+
+    public async Task<AudiusTrackDto?> GetTrackAsync(string trackId)
+    {
+        trackId = trackId.Trim();
+
+        if (string.IsNullOrWhiteSpace(trackId))
+            return null;
+
+        var cacheKey = $"audius:track:{trackId.ToLowerInvariant()}";
+
+        return await _cache.GetOrCreateAsync<AudiusTrackDto?>(
+            cacheKey,
+            TimeSpan.FromMinutes(30),
+            () => FetchTrackAsync(trackId));
+    }
+
+    public async Task<HttpResponseMessage> GetStreamAsync(
+        string trackId,
+        CancellationToken cancellationToken = default)
+    {
+        trackId = trackId.Trim();
+
+        if (string.IsNullOrWhiteSpace(trackId))
+            throw new ArgumentException("Track ID is required.");
+
+        var request = CreateAudiusRequest(
+            $"tracks/{Uri.EscapeDataString(trackId)}/stream");
+
+        var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+
+        return response;
+    }
+
+    private async Task<List<AudiusTrackDto>> FetchSearchAsync(
+        string query,
+        int limit)
+    {
+        using var request = CreateAudiusRequest(
             $"tracks/search?query={Uri.EscapeDataString(query)}");
-
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", apiKey);
 
         using var response = await _httpClient.SendAsync(request);
 
@@ -58,90 +112,78 @@ public class AudiusService
 
         foreach (var track in data.EnumerateArray().Take(limit))
         {
-          result.Add(ParseTrack(track));
+            result.Add(ParseTrack(track));
         }
 
         return result;
     }
 
-    public async Task<List<AudiusTrackDto>> GetTrendingAsync(
-    int limit = 20)
+    private async Task<List<AudiusTrackDto>> FetchTrendingAsync(int limit)
     {
-    limit = Math.Clamp(limit, 1, 50);
+        using var request = CreateAudiusRequest(
+            $"tracks/trending?limit={limit}");
 
-    var apiKey = _configuration["Audius:ApiKey"];
+        using var response = await _httpClient.SendAsync(request);
 
-    if (string.IsNullOrWhiteSpace(apiKey))
-        throw new InvalidOperationException(
-            "Audius API key is not configured.");
+        response.EnsureSuccessStatusCode();
 
-    using var request = new HttpRequestMessage(
-        HttpMethod.Get,
-        $"tracks/trending?limit={limit}");
+        using var stream =
+            await response.Content.ReadAsStreamAsync();
 
-    request.Headers.Authorization =
-        new AuthenticationHeaderValue("Bearer", apiKey);
+        using var document =
+            await JsonDocument.ParseAsync(stream);
 
-    using var response = await _httpClient.SendAsync(request);
+        var result = new List<AudiusTrackDto>();
 
-    response.EnsureSuccessStatusCode();
+        if (!document.RootElement.TryGetProperty("data", out var data))
+            return result;
 
-    using var stream =
-        await response.Content.ReadAsStreamAsync();
+        foreach (var track in data.EnumerateArray())
+        {
+            result.Add(ParseTrack(track));
+        }
 
-    using var document =
-        await JsonDocument.ParseAsync(stream);
-
-    var result = new List<AudiusTrackDto>();
-
-    if (!document.RootElement.TryGetProperty("data", out var data))
         return result;
-
-    foreach (var track in data.EnumerateArray())
-    {
-        result.Add(ParseTrack(track));
     }
 
-    return result;
+    private async Task<AudiusTrackDto?> FetchTrackAsync(string trackId)
+    {
+        using var request = CreateAudiusRequest(
+            $"tracks/{Uri.EscapeDataString(trackId)}");
+
+        using var response = await _httpClient.SendAsync(request);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+
+        response.EnsureSuccessStatusCode();
+
+        using var stream =
+            await response.Content.ReadAsStreamAsync();
+
+        using var document =
+            await JsonDocument.ParseAsync(stream);
+
+        if (!document.RootElement.TryGetProperty("data", out var data))
+            return null;
+
+        return ParseTrack(data);
     }
 
-    public async Task<AudiusTrackDto?> GetTrackAsync(string trackId)
+    private HttpRequestMessage CreateAudiusRequest(string url)
     {
-    trackId = trackId.Trim();
+        var apiKey = _configuration["Audius:ApiKey"];
 
-    if (string.IsNullOrWhiteSpace(trackId))
-        return null;
+        if (string.IsNullOrWhiteSpace(apiKey))
+            throw new InvalidOperationException(
+                "Audius API key is not configured.");
 
-    var apiKey = _configuration["Audius:ApiKey"];
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
 
-    if (string.IsNullOrWhiteSpace(apiKey))
-        throw new InvalidOperationException(
-            "Audius API key is not configured.");
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", apiKey);
 
-    using var request = new HttpRequestMessage(
-        HttpMethod.Get,
-        $"tracks/{Uri.EscapeDataString(trackId)}");
-
-    request.Headers.Authorization =
-        new AuthenticationHeaderValue("Bearer", apiKey);
-
-    using var response = await _httpClient.SendAsync(request);
-
-    if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-        return null;
-
-    response.EnsureSuccessStatusCode();
-
-    using var stream =
-        await response.Content.ReadAsStreamAsync();
-
-    using var document =
-        await JsonDocument.ParseAsync(stream);
-
-    if (!document.RootElement.TryGetProperty("data", out var data))
-        return null;
-
-    return ParseTrack(data);
+        return request;
     }
 
     private static string GetString(
@@ -162,71 +204,41 @@ public class AudiusService
             : null;
     }
 
-    public async Task<HttpResponseMessage> GetStreamAsync(
-    string trackId,
-    CancellationToken cancellationToken = default)
-    {
-    trackId = trackId.Trim();
-
-    if (string.IsNullOrWhiteSpace(trackId))
-        throw new ArgumentException("Track ID is required.");
-
-    var apiKey = _configuration["Audius:ApiKey"];
-
-    if (string.IsNullOrWhiteSpace(apiKey))
-        throw new InvalidOperationException(
-            "Audius API key is not configured.");
-
-    var request = new HttpRequestMessage(
-        HttpMethod.Get,
-        $"tracks/{Uri.EscapeDataString(trackId)}/stream");
-
-    request.Headers.Authorization =
-        new AuthenticationHeaderValue("Bearer", apiKey);
-
-    var response = await _httpClient.SendAsync(
-        request,
-        HttpCompletionOption.ResponseHeadersRead,
-        cancellationToken);
-
-    return response;
-    }
-
     private static AudiusTrackDto ParseTrack(JsonElement track)
     {
-    var id = GetString(track, "id");
-    var title = GetString(track, "title");
+        var id = GetString(track, "id");
+        var title = GetString(track, "title");
 
-    var artist = string.Empty;
+        var artist = string.Empty;
 
-    if (track.TryGetProperty("user", out var user))
-        artist = GetString(user, "name");
+        if (track.TryGetProperty("user", out var user))
+            artist = GetString(user, "name");
 
-    string? artworkUrl = null;
+        string? artworkUrl = null;
 
-    if (track.TryGetProperty("artwork", out var artwork) &&
-        artwork.ValueKind == JsonValueKind.Object)
-    {
-        artworkUrl =
-            GetNullableString(artwork, "480x480") ??
-            GetNullableString(artwork, "150x150");
-    }
+        if (track.TryGetProperty("artwork", out var artwork) &&
+            artwork.ValueKind == JsonValueKind.Object)
+        {
+            artworkUrl =
+                GetNullableString(artwork, "480x480") ??
+                GetNullableString(artwork, "150x150");
+        }
 
-    long? durationMs = null;
+        long? durationMs = null;
 
-    if (track.TryGetProperty("duration", out var duration) &&
-        duration.TryGetInt64(out var durationSeconds))
-    {
-        durationMs = durationSeconds * 1000;
-    }
+        if (track.TryGetProperty("duration", out var duration) &&
+            duration.TryGetInt64(out var durationSeconds))
+        {
+            durationMs = durationSeconds * 1000;
+        }
 
-    return new AudiusTrackDto
-    {
-        ExternalId = id,
-        Title = title,
-        Artist = artist,
-        ArtworkUrl = artworkUrl,
-        DurationMs = durationMs
-    };
+        return new AudiusTrackDto
+        {
+            ExternalId = id,
+            Title = title,
+            Artist = artist,
+            ArtworkUrl = artworkUrl,
+            DurationMs = durationMs
+        };
     }
 }
