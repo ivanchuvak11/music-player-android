@@ -63,6 +63,8 @@ Local API URLs:
 - Redis: `localhost:6379`
 
 For Audius endpoints, set `Audius:ApiKey` in `backend/MusicPlayer.Api/appsettings.Development.json`.
+For SoundCloud endpoints, set `SoundCloud:AccessToken` or `SoundCloud:ClientId` in `backend/MusicPlayer.Api/appsettings.Development.json`.
+For Jamendo endpoints, set `Jamendo:ClientId` in `backend/MusicPlayer.Api/appsettings.Development.json`.
 
 Redis is used by the backend to cache read-only Audius and Radio Browser responses during local development.
 
@@ -74,6 +76,22 @@ Radio endpoints for Android:
 - `GET /api/radio/by-genre/jazz?limit=20`
 
 The Android app should pass the returned `streamUrl` to Media3/ExoPlayer for playback.
+
+SoundCloud endpoints:
+
+- `GET /api/soundcloud/search?q=lofi&limit=20`
+- `GET /api/soundcloud/tracks/{id}`
+- `GET /api/soundcloud/tracks/{id}/stream`
+
+SoundCloud results include attribution fields. The Android UI should show the uploader, SoundCloud as the source, and a link to the original `soundCloudUrl`.
+
+Jamendo endpoints:
+
+- `GET /api/jamendo/search?q=rock&limit=20`
+- `GET /api/jamendo/tracks/{id}`
+- `GET /api/jamendo/tracks/{id}/stream`
+
+Jamendo results include a direct `streamUrl` and can be played by Media3/ExoPlayer.
 
 ## Team
 

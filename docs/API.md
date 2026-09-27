@@ -227,6 +227,149 @@ Android-застосунок може використовувати цей endp
 
 ---
 
+# Jamendo
+
+Jamendo використовується як додаткове зовнішнє джерело незалежної музики з прямими audio URL.
+
+Усі Jamendo endpoint'и потребують JWT-авторизації.
+
+Для роботи потрібен `Jamendo:ClientId` у конфігурації backend.
+
+## Пошук треків Jamendo
+
+```http
+GET /api/jamendo/search?q={query}&limit={limit}
+```
+
+### Приклад
+
+```http
+GET /api/jamendo/search?q=rock&limit=10
+```
+
+### Відповідь
+
+```json
+[
+  {
+    "source": "jamendo",
+    "externalId": "1848357",
+    "title": "Example Track",
+    "artist": "Example Artist",
+    "artworkUrl": "https://usercontent.jamendo.com/example.jpg",
+    "durationMs": 180000,
+    "album": "Example Album",
+    "licenseUrl": "https://creativecommons.org/licenses/by-nc-nd/3.0/",
+    "jamendoUrl": "https://www.jamendo.com/track/1848357",
+    "streamUrl": "https://prod-1.storage.jamendo.com/?trackid=1848357&format=mp32"
+  }
+]
+```
+
+---
+
+## Отримання інформації про Jamendo трек
+
+```http
+GET /api/jamendo/tracks/{id}
+```
+
+### Приклад
+
+```http
+GET /api/jamendo/tracks/1848357
+```
+
+---
+
+## Відтворення Jamendo треку
+
+```http
+GET /api/jamendo/tracks/{id}/stream
+```
+
+### Приклад
+
+```http
+GET /api/jamendo/tracks/1848357/stream
+```
+
+Android-застосунок може використовувати цей endpoint або прямий `streamUrl` як джерело аудіо для Media3/ExoPlayer.
+
+---
+
+# SoundCloud
+
+SoundCloud використовується як додаткове зовнішнє джерело музичних треків.
+
+Усі SoundCloud endpoint'и потребують JWT-авторизації.
+
+Для роботи потрібен `SoundCloud:AccessToken` або `SoundCloud:ClientId` у конфігурації backend.
+
+Backend повертає тільки треки з доступом `playable`, які можна відтворювати поза SoundCloud. Android UI повинен показувати автора, SoundCloud як джерело та посилання `soundCloudUrl`.
+
+## Пошук треків SoundCloud
+
+```http
+GET /api/soundcloud/search?q={query}&limit={limit}
+```
+
+### Приклад
+
+```http
+GET /api/soundcloud/search?q=lofi&limit=10
+```
+
+### Відповідь
+
+```json
+[
+  {
+    "source": "soundcloud",
+    "externalId": "123456789",
+    "title": "Example Track",
+    "artist": "Example Artist",
+    "artworkUrl": "https://example.com/artwork.jpg",
+    "durationMs": 180000,
+    "genre": "Lo-Fi",
+    "soundCloudUrl": "https://soundcloud.com/example/track",
+    "streamUrl": "/api/soundcloud/tracks/123456789/stream"
+  }
+]
+```
+
+---
+
+## Отримання інформації про SoundCloud трек
+
+```http
+GET /api/soundcloud/tracks/{id}
+```
+
+### Приклад
+
+```http
+GET /api/soundcloud/tracks/123456789
+```
+
+---
+
+## Відтворення SoundCloud треку
+
+```http
+GET /api/soundcloud/tracks/{id}/stream
+```
+
+### Приклад
+
+```http
+GET /api/soundcloud/tracks/123456789/stream
+```
+
+Android-застосунок може використовувати цей endpoint як джерело аудіо для Media3/ExoPlayer.
+
+---
+
 # Плейлисти
 
 ## Отримання плейлистів користувача
@@ -331,6 +474,8 @@ POST /api/playlists/{playlistId}/tracks
 ```text
 audius
 youtube
+soundcloud
+jamendo
 ```
 
 ### Запит
@@ -404,6 +549,8 @@ DELETE /api/playlists/{id}
 ```text
 audius
 youtube
+soundcloud
+jamendo
 ```
 
 ## Отримання улюблених треків
@@ -636,6 +783,8 @@ DELETE /api/radio/favorites/{id}
 | Джерело | Значення | Стан |
 |---|---|---|
 | Audius | `audius` | Реалізовано |
+| SoundCloud | `soundcloud` | Реалізовано |
+| Jamendo | `jamendo` | Реалізовано |
 | YouTube | `youtube` | Заплановано |
 
 ## Audius
@@ -654,6 +803,26 @@ Audius використовується для:
 Інтеграція YouTube планується окремо.
 
 Для YouTube буде використовуватися офіційний механізм відтворення YouTube. YouTube не розглядається як пряме джерело аудіопотоку для Media3.
+
+## SoundCloud
+
+SoundCloud використовується для:
+
+- пошуку playable треків;
+- отримання метаданих треку;
+- отримання аудіопотоку через backend proxy endpoint;
+- збереження треків у плейлистах;
+- збереження треків в улюблених.
+
+## Jamendo
+
+Jamendo використовується для:
+
+- пошуку незалежної музики;
+- отримання метаданих треку;
+- отримання аудіопотоку;
+- збереження треків у плейлистах;
+- збереження треків в улюблених.
 
 ## Локальна музика
 
@@ -708,6 +877,10 @@ Redis використовується для кешування read-only за�
 | Audius search | 5 хвилин |
 | Audius trending | 5 хвилин |
 | Audius track metadata | 30 хвилин |
+| SoundCloud search | 5 хвилин |
+| SoundCloud track metadata | 30 хвилин |
+| Jamendo search | 10 хвилин |
+| Jamendo track metadata | 1 година |
 | Radio Browser search | 10 хвилин |
 | Radio Browser popular | 10 хвилин |
 | Radio Browser station metadata | 24 години |
