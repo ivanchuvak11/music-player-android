@@ -3,10 +3,14 @@ package com.musicplayer.android.core.audio
 import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import com.musicplayer.android.core.network.AudiusTrackDto
+import com.musicplayer.android.core.network.JamendoTrackDto
+import com.musicplayer.android.core.network.RadioStationDto
+import com.musicplayer.android.core.network.SoundCloudTrackDto
 import kotlinx.serialization.Serializable
 
 /**
- * Representation of an audio track regardless of its source (Local, Radio, SoundCloud, YouTube).
+ * Representation of an audio track regardless of its source (Local, Radio, Jamendo, Audius, SoundCloud).
  */
 @Serializable
 data class AudioTrack(
@@ -51,6 +55,70 @@ data class AudioTrack(
                 isLiveStream = durationMs <= 0L && !isLocal
             )
         }
+
+        fun fromJamendo(track: JamendoTrackDto, backendBaseUrl: String = "http://10.0.2.2:5116/"): AudioTrack {
+            // Prefer direct CDN stream if available, otherwise fallback to backend proxy stream endpoint
+            val streamUri = if (!track.streamUrl.isNullOrBlank()) {
+                track.streamUrl
+            } else {
+                "${backendBaseUrl.trimEnd('/')}/api/jamendo/tracks/${track.externalId}/stream"
+            }
+            return AudioTrack(
+                id = "jamendo_${track.externalId}",
+                title = track.title,
+                artist = track.artist,
+                audioUrl = streamUri,
+                artworkUrl = track.artworkUrl,
+                durationMs = track.durationMs ?: 0L,
+                isLocal = false,
+                isLiveStream = false
+            )
+        }
+
+        fun fromRadio(station: RadioStationDto): AudioTrack {
+            return AudioTrack(
+                id = "radio_${station.stationId}",
+                title = station.name,
+                artist = station.genre?.takeIf { it.isNotBlank() } ?: station.country ?: "Radio",
+                audioUrl = station.streamUrl,
+                artworkUrl = station.logoUrl,
+                durationMs = 0L,
+                isLocal = false,
+                isLiveStream = true
+            )
+        }
+
+        fun fromAudius(track: AudiusTrackDto, backendBaseUrl: String = "http://10.0.2.2:5116/"): AudioTrack {
+            val streamUri = "${backendBaseUrl.trimEnd('/')}/api/audius/tracks/${track.externalId}/stream"
+            return AudioTrack(
+                id = "audius_${track.externalId}",
+                title = track.title,
+                artist = track.artist,
+                audioUrl = streamUri,
+                artworkUrl = track.artworkUrl,
+                durationMs = track.durationMs ?: 0L,
+                isLocal = false,
+                isLiveStream = false
+            )
+        }
+
+        fun fromSoundCloud(track: SoundCloudTrackDto, backendBaseUrl: String = "http://10.0.2.2:5116/"): AudioTrack {
+            val streamUri = if (!track.streamUrl.isNullOrBlank()) {
+                track.streamUrl
+            } else {
+                "${backendBaseUrl.trimEnd('/')}/api/soundcloud/tracks/${track.externalId}/stream"
+            }
+            return AudioTrack(
+                id = "soundcloud_${track.externalId}",
+                title = track.title,
+                artist = track.artist,
+                audioUrl = streamUri,
+                artworkUrl = track.artworkUrl,
+                durationMs = track.durationMs ?: 0L,
+                isLocal = false,
+                isLiveStream = false
+            )
+        }
     }
 }
 
@@ -67,7 +135,8 @@ data class PlaybackState(
     val hasNext: Boolean = false,
     val hasPrevious: Boolean = false,
     val shuffleModeEnabled: Boolean = false,
-    val repeatMode: Int = REPEAT_MODE_OFF
+    val repeatMode: Int = REPEAT_MODE_OFF,
+    val playbackSpeed: Float = 1.0f
 ) {
     companion object {
         const val REPEAT_MODE_OFF = 0
@@ -75,4 +144,3 @@ data class PlaybackState(
         const val REPEAT_MODE_ALL = 2
     }
 }
-

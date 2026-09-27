@@ -64,15 +64,23 @@ fun PlayerCoreScreen() {
     val localTracks by viewModel.localTracks.collectAsState()
     val trendingAudius by viewModel.trendingAudiusTracks.collectAsState()
     val searchedAudius by viewModel.searchedAudiusTracks.collectAsState()
+    val searchedJamendo by viewModel.searchedJamendoTracks.collectAsState()
     val radioStations by viewModel.radioStations.collectAsState()
+    val radioStationsByCountry by viewModel.radioStationsByCountry.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
-    val cachedTracks by viewModel.cachedTracks.collectAsState()
+    val cachedTracks by viewModel.searchedCachedTracks.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val authStatus by viewModel.authStatusMessage.collectAsState()
+    val isOnline by viewModel.isOnline.collectAsState()
 
+    var audioCacheSizeBytes by remember { mutableStateOf(viewModel.getAudioCacheSizeBytes()) }
+    var serverUrlInput by remember { mutableStateOf(viewModel.getBaseUrl()) }
+    var isServerConfigExpanded by remember { mutableStateOf(false) }
+    var cachedFilterQuery by remember { mutableStateOf("") }
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
+    var jamendoQuery by remember { mutableStateOf("") }
     var newPlaylistName by remember { mutableStateOf("") }
 
     // Permission launcher for scanning local audio
@@ -87,6 +95,10 @@ fun PlayerCoreScreen() {
         }
     }
 
+    LaunchedEffect(Unit) {
+        viewModel.loadLocalTracks()
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -95,17 +107,87 @@ fun PlayerCoreScreen() {
     ) {
         // App Header
         item {
-            Text(
-                text = "🎵 Music Player Core",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = "Повна функціональна панель: плеєр, авторизація, радіо, база Room",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "🎵 Music Player Core",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Повна функціональна панель: плеєр, авторизація, радіо, база Room",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                AssistChip(
+                    onClick = {},
+                    label = { Text(if (isOnline) "🟢 Онлайн" else "🔴 Офлайн", fontSize = 11.sp) }
+                )
+            }
+        }
+
+        // Server URL Configuration (collapsible for cleaner UI)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isServerConfigExpanded = !isServerConfigExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🌐 Сервер: ${serverUrlInput.trimEnd('/')}",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = if (isServerConfigExpanded) "▲ Приховати" else "▼ Змінити",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    if (isServerConfigExpanded) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = serverUrlInput,
+                                onValueChange = { serverUrlInput = it },
+                                label = { Text("Base URL сервера") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(onClick = {
+                                viewModel.setBaseUrl(serverUrlInput)
+                                isServerConfigExpanded = false
+                                Toast.makeText(context, "Сервер оновлено: $serverUrlInput", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Text("ОК")
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Active Player Card with Seek Bar
@@ -218,6 +300,25 @@ fun PlayerCoreScreen() {
                                 else -> "🔁 Повтор: Вимк"
                             }
                             Text(repeatText)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Playback Speed control
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Швидкість:", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
+                            val speedLabel = if (speed == 1.0f) "1x" else if (speed == 2.0f) "2x" else "${speed}x"
+                            FilterChip(
+                                selected = playbackState.playbackSpeed == speed,
+                                onClick = { viewModel.setPlaybackSpeed(speed) },
+                                label = { Text(speedLabel, fontSize = 10.sp, maxLines = 1) }
+                            )
                         }
                     }
                 }
@@ -400,6 +501,7 @@ fun PlayerCoreScreen() {
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
+                            viewModel.loadLocalTracks()
                             val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 Manifest.permission.READ_MEDIA_AUDIO
                             } else {
@@ -443,13 +545,45 @@ fun PlayerCoreScreen() {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "💾 Офлайн-кеш Room DB (${cachedTracks.size} треків збережено):",
+                        text = "💾 Офлайн-кеш Room DB (${cachedTracks.size} знайдено):",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
-                    if (cachedTracks.isEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = cachedFilterQuery,
+                        onValueChange = {
+                            cachedFilterQuery = it
+                            viewModel.searchCachedTracks(it)
+                        },
+                        label = { Text("Швидкий пошук у базі Room...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val cacheMb = audioCacheSizeBytes / (1024 * 1024)
                         Text(
-                            text = "Поки порожньо. Натисніть кнопку «+ Кеш» біля будь-якої пісні.",
+                            text = "Дисковий кеш: $cacheMb МБ",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedButton(onClick = {
+                            viewModel.clearAudioCache()
+                            audioCacheSizeBytes = viewModel.getAudioCacheSizeBytes()
+                            Toast.makeText(context, "Кеш очищено", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Text("🧹 Очистити кеш", fontSize = 11.sp)
+                        }
+                    }
+                    if (cachedTracks.isEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (cachedFilterQuery.isBlank()) "Поки порожньо. Натисніть кнопку «+ Кеш» біля будь-якої пісні." else "Нічого не знайдено за запитом «$cachedFilterQuery»",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -541,6 +675,140 @@ fun PlayerCoreScreen() {
                             Text(text = audiusTrack.artist, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Button(onClick = { viewModel.playAudiusTrack(audiusTrack) }) {
+                            Text("▶")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Jamendo Music Search (Основне джерело онлайн-треків)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "🎸 Пошук треків у Jamendo (Playable Online MP3):",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = jamendoQuery,
+                            onValueChange = { jamendoQuery = it },
+                            placeholder = { Text("Наприклад: rock, electronic...") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (jamendoQuery.isNotBlank()) {
+                                    viewModel.searchJamendo(jamendoQuery.trim())
+                                }
+                            }
+                        ) {
+                            Text("Пошук")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (searchedJamendo.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Знайдено в Jamendo (${searchedJamendo.size}):",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+            }
+            items(searchedJamendo) { jamendoTrack ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.playJamendoTrack(jamendoTrack) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = jamendoTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
+                            Text(
+                                text = "${jamendoTrack.artist} • ${jamendoTrack.album ?: "Jamendo"}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Button(onClick = { viewModel.playJamendoTrack(jamendoTrack) }) {
+                            Text("▶")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Radio by Country (UA)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "🇺🇦 Українські радіостанції (Radio Browser + Redis):",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            viewModel.loadRadioByCountry("UA")
+                        }
+                    ) {
+                        Text("📻 Оновити станції України (UA)")
+                    }
+                }
+            }
+        }
+
+        if (radioStationsByCountry.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Радіостанції України (${radioStationsByCountry.size}):",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+            }
+            items(radioStationsByCountry) { station ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.playRadioStation(station) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = station.name, fontWeight = FontWeight.Medium, maxLines = 1)
+                            Text(
+                                text = "${station.genre ?: "Music"} • ${station.codec ?: "MP3"}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Button(onClick = { viewModel.playRadioStation(station) }) {
                             Text("▶")
                         }
                     }

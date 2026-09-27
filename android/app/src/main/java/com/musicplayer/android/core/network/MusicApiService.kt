@@ -15,7 +15,7 @@ interface MusicApiService {
 
     // Auth
     @POST("api/auth/register")
-    suspend fun register(@Body request: RegisterRequestDto): Response<AuthResponseDto>
+    suspend fun register(@Body request: RegisterRequestDto): Response<UserDto>
 
     @POST("api/auth/login")
     suspend fun login(@Body request: LoginRequestDto): Response<AuthResponseDto>
@@ -62,12 +62,26 @@ interface MusicApiService {
     // Radio (Radio Browser integration)
     @GET("api/radio/search")
     suspend fun searchRadioStations(
-        @Query("q") query: String,
+        @Query("q") query: String? = null,
+        @Query("countryCode") countryCode: String? = null,
+        @Query("genre") genre: String? = null,
         @Query("limit") limit: Int = 20
     ): Response<List<RadioStationDto>>
 
     @GET("api/radio/popular")
     suspend fun getPopularRadioStations(
+        @Query("limit") limit: Int = 20
+    ): Response<List<RadioStationDto>>
+
+    @GET("api/radio/by-country/{countryCode}")
+    suspend fun getRadioStationsByCountry(
+        @Path("countryCode") countryCode: String,
+        @Query("limit") limit: Int = 20
+    ): Response<List<RadioStationDto>>
+
+    @GET("api/radio/by-genre/{genre}")
+    suspend fun getRadioStationsByGenre(
+        @Path("genre") genre: String,
         @Query("limit") limit: Int = 20
     ): Response<List<RadioStationDto>>
 
@@ -79,6 +93,16 @@ interface MusicApiService {
 
     @DELETE("api/radio/favorites/{id}")
     suspend fun removeFavoriteRadioStation(@Path("id") id: Int): Response<Unit>
+
+    // Jamendo (Primary playable online tracks)
+    @GET("api/jamendo/search")
+    suspend fun searchJamendoTracks(
+        @Query("q") query: String,
+        @Query("limit") limit: Int = 20
+    ): Response<List<JamendoTrackDto>>
+
+    @GET("api/jamendo/tracks/{id}")
+    suspend fun getJamendoTrack(@Path("id") id: String): Response<JamendoTrackDto>
 
     // Audius (Music streaming integration)
     @GET("api/audius/search")
@@ -94,4 +118,14 @@ interface MusicApiService {
 
     @GET("api/audius/tracks/{id}")
     suspend fun getAudiusTrack(@Path("id") id: String): Response<AudiusTrackDto>
+
+    // SoundCloud (Optional / Planned streaming integration)
+    @GET("api/soundcloud/search")
+    suspend fun searchSoundCloudTracks(
+        @Query("q") query: String,
+        @Query("limit") limit: Int = 20
+    ): Response<List<SoundCloudTrackDto>>
+
+    @GET("api/soundcloud/tracks/{id}")
+    suspend fun getSoundCloudTrack(@Path("id") id: String): Response<SoundCloudTrackDto>
 }

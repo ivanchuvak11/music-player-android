@@ -151,4 +151,81 @@ class NetworkSerializationTest {
         assertEquals("Producer One", track.artist)
         assertEquals(117000L, track.durationMs)
     }
+
+    @Test
+    fun testJamendoTrackDtoDeserialization() {
+        val rawJson = """
+            [
+              {
+                "source": "jamendo",
+                "externalId": "1270449",
+                "title": "dub sequences",
+                "artist": "Elektrojudas",
+                "artworkUrl": "https://usercontent.jamendo.com?trackid=1270449",
+                "durationMs": 255000,
+                "album": "Dub Space",
+                "licenseUrl": "https://creativecommons.org/licenses/by-nc-sa/3.0/",
+                "jamendoUrl": "https://www.jamendo.com/track/1270449",
+                "streamUrl": "https://prod-1.storage.jamendo.com/?trackid=1270449"
+              }
+            ]
+        """.trimIndent()
+
+        val tracks = json.decodeFromString<List<com.musicplayer.android.core.network.JamendoTrackDto>>(rawJson)
+        assertEquals(1, tracks.size)
+        val track = tracks.first()
+        assertEquals("jamendo", track.source)
+        assertEquals("1270449", track.externalId)
+        assertEquals("dub sequences", track.title)
+        assertEquals("Elektrojudas", track.artist)
+        assertEquals(255000L, track.durationMs)
+        assertEquals("Dub Space", track.album)
+        assertEquals("https://prod-1.storage.jamendo.com/?trackid=1270449", track.streamUrl)
+    }
+
+    @Test
+    fun testSoundCloudTrackDtoDeserialization() {
+        val rawJson = """
+            [
+              {
+                "source": "soundcloud",
+                "externalId": "sc_789",
+                "title": "Lofi Chill Beat",
+                "artist": "Lofi Beats",
+                "artworkUrl": "https://example.com/sc.jpg",
+                "durationMs": 180000,
+                "genre": "lofi",
+                "streamUrl": "https://api-v2.soundcloud.com/media/stream"
+              }
+            ]
+        """.trimIndent()
+
+        val tracks = json.decodeFromString<List<com.musicplayer.android.core.network.SoundCloudTrackDto>>(rawJson)
+        assertEquals(1, tracks.size)
+        val track = tracks.first()
+        assertEquals("soundcloud", track.source)
+        assertEquals("sc_789", track.externalId)
+        assertEquals("Lofi Chill Beat", track.title)
+        assertEquals("lofi", track.genre)
+    }
+
+    @Test
+    fun testAddTrackToPlaylistSerialization() {
+        val request = com.musicplayer.android.core.network.AddTrackToPlaylistRequestDto(
+            source = "jamendo",
+            externalId = "1270449",
+            title = "dub sequences",
+            artist = "Elektrojudas",
+            artworkUrl = "https://example.com/art.jpg",
+            durationMs = 255000L
+        )
+
+        val serialized = json.encodeToString(com.musicplayer.android.core.network.AddTrackToPlaylistRequestDto.serializer(), request)
+        assertNotNull(serialized)
+
+        val deserialized = json.decodeFromString<com.musicplayer.android.core.network.AddTrackToPlaylistRequestDto>(serialized)
+        assertEquals("jamendo", deserialized.source)
+        assertEquals("1270449", deserialized.externalId)
+        assertEquals("dub sequences", deserialized.title)
+    }
 }

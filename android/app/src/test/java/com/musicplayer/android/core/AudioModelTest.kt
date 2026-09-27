@@ -132,4 +132,101 @@ class AudioModelTest {
         val repeatAllState = state.copy(repeatMode = PlaybackState.REPEAT_MODE_ALL)
         assertEquals(PlaybackState.REPEAT_MODE_ALL, repeatAllState.repeatMode)
     }
+
+    @Test
+    fun testPlaybackSpeedInPlaybackState() {
+        val defaultState = PlaybackState()
+        assertEquals(1.0f, defaultState.playbackSpeed, 0.001f)
+
+        val updatedState = defaultState.copy(playbackSpeed = 1.5f)
+        assertEquals(1.5f, updatedState.playbackSpeed, 0.001f)
+
+        val slowState = defaultState.copy(playbackSpeed = 0.75f)
+        assertEquals(0.75f, slowState.playbackSpeed, 0.001f)
+    }
+
+    @Test
+    fun testFromJamendoFactory() {
+        val jamendoDto = com.musicplayer.android.core.network.JamendoTrackDto(
+            externalId = "9988",
+            title = "Chill Guitar",
+            artist = "Acoustic Band",
+            artworkUrl = "https://example.com/art.jpg",
+            durationMs = 210000L,
+            streamUrl = "https://example.com/stream.mp3"
+        )
+        val track = AudioTrack.fromJamendo(jamendoDto)
+        assertEquals("jamendo_9988", track.id)
+        assertEquals("Chill Guitar", track.title)
+        assertEquals("Acoustic Band", track.artist)
+        assertEquals("https://example.com/stream.mp3", track.audioUrl)
+        assertEquals(210000L, track.durationMs)
+        assertFalse(track.isLocal)
+        assertFalse(track.isLiveStream)
+    }
+
+    @Test
+    fun testFromRadioFactory() {
+        val radioDto = com.musicplayer.android.core.network.RadioStationDto(
+            stationId = "rad-123",
+            name = "Radio Rocks",
+            streamUrl = "https://example.com/stream.aac",
+            logoUrl = "https://example.com/logo.png",
+            genre = "Rock"
+        )
+        val track = AudioTrack.fromRadio(radioDto)
+        assertEquals("radio_rad-123", track.id)
+        assertEquals("Radio Rocks", track.title)
+        assertEquals("Rock", track.artist)
+        assertEquals("https://example.com/stream.aac", track.audioUrl)
+        assertTrue(track.isLiveStream)
+        assertFalse(track.isLocal)
+    }
+
+    @Test
+    fun testFromAudiusFactory() {
+        val audiusDto = com.musicplayer.android.core.network.AudiusTrackDto(
+            externalId = "aud-456",
+            title = "Audius Beat",
+            artist = "DJ Electron",
+            artworkUrl = "https://example.com/art2.jpg",
+            durationMs = 150000L
+        )
+        val track = AudioTrack.fromAudius(audiusDto)
+        assertEquals("audius_aud-456", track.id)
+        assertEquals("Audius Beat", track.title)
+        assertTrue(track.audioUrl.contains("api/audius/tracks/aud-456/stream"))
+    }
+
+    @Test
+    fun testFromAudiusWithCustomBaseUrl() {
+        val audiusDto = com.musicplayer.android.core.network.AudiusTrackDto(
+            externalId = "aud-789",
+            title = "Physical Device Track",
+            artist = "DJ Test",
+            artworkUrl = "https://example.com/art3.jpg",
+            durationMs = 180000L
+        )
+        val customBaseUrl = "http://192.168.1.100:5116/"
+        val track = AudioTrack.fromAudius(audiusDto, backendBaseUrl = customBaseUrl)
+        assertEquals("http://192.168.1.100:5116/api/audius/tracks/aud-789/stream", track.audioUrl)
+    }
+
+    @Test
+    fun testCachedTrackEntityCreation() {
+        val entity = com.musicplayer.android.core.database.CachedTrackEntity(
+            id = "jamendo_123",
+            title = "Offline Song",
+            artist = "Offline Artist",
+            localFilePath = "/data/cache/123.mp3",
+            originalUrl = "https://example.com/123.mp3",
+            durationMs = 200000L,
+            cachedAtTimestamp = 1711500000000L
+        )
+        assertEquals("jamendo_123", entity.id)
+        assertEquals("Offline Song", entity.title)
+        assertEquals("Offline Artist", entity.artist)
+        assertEquals("/data/cache/123.mp3", entity.localFilePath)
+        assertEquals(1711500000000L, entity.cachedAtTimestamp)
+    }
 }

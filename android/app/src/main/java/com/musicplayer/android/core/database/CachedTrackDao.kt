@@ -11,6 +11,9 @@ interface CachedTrackDao {
     @Query("SELECT * FROM cached_tracks ORDER BY cachedAtTimestamp DESC")
     fun getAllCachedTracks(): Flow<List<CachedTrackEntity>>
 
+    @Query("SELECT * FROM cached_tracks WHERE title LIKE '%' || :query || '%' OR artist LIKE '%' || :query || '%' ORDER BY cachedAtTimestamp DESC")
+    fun searchCachedTracks(query: String): Flow<List<CachedTrackEntity>>
+
     @Query("SELECT * FROM cached_tracks WHERE id = :id LIMIT 1")
     suspend fun getTrackById(id: String): CachedTrackEntity?
 

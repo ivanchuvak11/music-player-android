@@ -20,3 +20,24 @@
 # Media3 / ExoPlayer
 -keep class androidx.media3.** { *; }
 -dontwarn androidx.media3.**
+
+# Retrofit 2
+-dontwarn retrofit2.**
+-keep class retrofit2.** { *; }
+-keepattributes Signature
+-keepattributes Exceptions
+-keepclasseswithmembers interface * {
+    @retrofit2.http.* <methods>;
+}
+
+# OkHttp 3 & Okio
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-keep class okhttp3.** { *; }
+-keep interface okhttp3.** { *; }
+-dontwarn javax.annotation.**
+
+# Coroutines
+-dontwarn kotlinx.coroutines.**
+-keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
+-keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
