@@ -17,7 +17,7 @@ data class LoginRequestDto(
 
 @Serializable
 data class AuthResponseDto(
-    val token: String,
+    val token: String? = null,
     val userId: Int? = null,
     val username: String? = null,
     val email: String? = null
@@ -69,7 +69,7 @@ data class CreatePlaylistRequestDto(
 
 @Serializable
 data class AddTrackToPlaylistRequestDto(
-    val source: String = "soundcloud",
+    val source: String = "jamendo",
     val externalId: String,
     val title: String,
     val artist: String,
@@ -95,7 +95,7 @@ data class FavoriteTrackDto(
 
 @Serializable
 data class AddFavoriteTrackRequestDto(
-    val source: String = "youtube",
+    val source: String = "jamendo",
     val externalId: String,
     val title: String,
     val artist: String,
@@ -138,4 +138,31 @@ data class AudiusTrackDto(
     val artist: String,
     val artworkUrl: String? = null,
     val durationMs: Long? = 0L
+)
+
+@Serializable
+data class JamendoTrackDto(
+    val source: String = "jamendo",
+    val externalId: String,
+    val title: String,
+    val artist: String,
+    val artworkUrl: String? = null,
+    val durationMs: Long? = null,
+    val album: String? = null,
+    val licenseUrl: String? = null,
+    val jamendoUrl: String? = null,
+    val streamUrl: String? = null
+)
+
+@Serializable
+data class SoundCloudTrackDto(
+    val source: String = "soundcloud",
+    val externalId: String,
+    val title: String,
+    val artist: String,
+    val artworkUrl: String? = null,
+    val durationMs: Long? = null,
+    val genre: String? = null,
+    val soundCloudUrl: String? = null,
+    val streamUrl: String? = null
 )

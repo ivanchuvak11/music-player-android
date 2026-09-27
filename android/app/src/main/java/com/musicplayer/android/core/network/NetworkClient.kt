@@ -14,6 +14,8 @@ class AuthInterceptor : Interceptor {
     @Volatile
     var authToken: String? = null
 
+    var onUnauthorizedListener: (() -> Unit)? = null
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val builder = original.newBuilder()
@@ -23,13 +25,17 @@ class AuthInterceptor : Interceptor {
             builder.addHeader("Authorization", "Bearer $token")
         }
 
-        return chain.proceed(builder.build())
+        val response = chain.proceed(builder.build())
+        if (response.code == 401 && !token.isNullOrBlank()) {
+            onUnauthorizedListener?.invoke()
+        }
+        return response
     }
 }
 
 object NetworkClient {
-    // 10.0.2.2 points to localhost of host machine in Android Emulator
-    private const val DEFAULT_BASE_URL = "http://10.0.2.2:5000/"
+    // 10.0.2.2 points to localhost of host machine in Android Emulator (port 5116)
+    const val DEFAULT_BASE_URL = "http://10.0.2.2:5116/"
 
     val authInterceptor = AuthInterceptor()
 

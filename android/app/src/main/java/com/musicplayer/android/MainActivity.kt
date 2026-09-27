@@ -64,7 +64,9 @@ fun PlayerCoreScreen() {
     val localTracks by viewModel.localTracks.collectAsState()
     val trendingAudius by viewModel.trendingAudiusTracks.collectAsState()
     val searchedAudius by viewModel.searchedAudiusTracks.collectAsState()
+    val searchedJamendo by viewModel.searchedJamendoTracks.collectAsState()
     val radioStations by viewModel.radioStations.collectAsState()
+    val radioStationsByCountry by viewModel.radioStationsByCountry.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
     val cachedTracks by viewModel.cachedTracks.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
@@ -73,6 +75,7 @@ fun PlayerCoreScreen() {
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
+    var jamendoQuery by remember { mutableStateOf("") }
     var newPlaylistName by remember { mutableStateOf("") }
 
     // Permission launcher for scanning local audio
@@ -85,6 +88,10 @@ fun PlayerCoreScreen() {
         } else {
             Toast.makeText(context, "Дозвіл на читання аудіо відхилено", Toast.LENGTH_LONG).show()
         }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.loadLocalTracks()
     }
 
     LazyColumn(
@@ -400,6 +407,7 @@ fun PlayerCoreScreen() {
                     Button(
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
+                            viewModel.loadLocalTracks()
                             val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 Manifest.permission.READ_MEDIA_AUDIO
                             } else {
@@ -541,6 +549,140 @@ fun PlayerCoreScreen() {
                             Text(text = audiusTrack.artist, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Button(onClick = { viewModel.playAudiusTrack(audiusTrack) }) {
+                            Text("▶")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Jamendo Music Search (Основне джерело онлайн-треків)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "🎸 Пошук треків у Jamendo (Playable Online MP3):",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = jamendoQuery,
+                            onValueChange = { jamendoQuery = it },
+                            placeholder = { Text("Наприклад: rock, electronic...") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (jamendoQuery.isNotBlank()) {
+                                    viewModel.searchJamendo(jamendoQuery.trim())
+                                }
+                            }
+                        ) {
+                            Text("Пошук")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (searchedJamendo.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Знайдено в Jamendo (${searchedJamendo.size}):",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+            }
+            items(searchedJamendo) { jamendoTrack ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.playJamendoTrack(jamendoTrack) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = jamendoTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
+                            Text(
+                                text = "${jamendoTrack.artist} • ${jamendoTrack.album ?: "Jamendo"}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Button(onClick = { viewModel.playJamendoTrack(jamendoTrack) }) {
+                            Text("▶")
+                        }
+                    }
+                }
+            }
+        }
+
+        // Section: Radio by Country (UA)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "🇺🇦 Українські радіостанції (Radio Browser + Redis):",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            viewModel.loadRadioByCountry("UA")
+                        }
+                    ) {
+                        Text("📻 Оновити станції України (UA)")
+                    }
+                }
+            }
+        }
+
+        if (radioStationsByCountry.isNotEmpty()) {
+            item {
+                Text(
+                    text = "Радіостанції України (${radioStationsByCountry.size}):",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp
+                )
+            }
+            items(radioStationsByCountry) { station ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.playRadioStation(station) },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(text = station.name, fontWeight = FontWeight.Medium, maxLines = 1)
+                            Text(
+                                text = "${station.genre ?: "Music"} • ${station.codec ?: "MP3"}",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Button(onClick = { viewModel.playRadioStation(station) }) {
                             Text("▶")
                         }
                     }
