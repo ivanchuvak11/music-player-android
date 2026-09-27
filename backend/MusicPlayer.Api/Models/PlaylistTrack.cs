@@ -5,7 +5,7 @@ public class PlaylistTrack
     public int Id { get; set; }
     public int PlaylistId { get; set; }
     public Playlist Playlist { get; set; } = null!;
-    // "Audius" або "youtube"
+    // "audius", "youtube", "soundcloud" або "jamendo"
     public string Source { get; set; } = string.Empty;
     // ID треку у Audius або YouTube
     public string ExternalId { get; set; } = string.Empty;

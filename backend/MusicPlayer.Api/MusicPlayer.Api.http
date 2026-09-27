@@ -4,3 +4,37 @@ GET {{MusicPlayer.Api_HostAddress}}/api/health
 Accept: application/json
 
 ###
+
+GET {{MusicPlayer.Api_HostAddress}}/api/soundcloud/search?q=lofi&limit=5
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+GET {{MusicPlayer.Api_HostAddress}}/api/soundcloud/tracks/{{soundcloudTrackId}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+GET {{MusicPlayer.Api_HostAddress}}/api/soundcloud/tracks/{{soundcloudTrackId}}/stream
+Authorization: Bearer {{token}}
+
+###
+
+GET {{MusicPlayer.Api_HostAddress}}/api/jamendo/search?q=rock&limit=5
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+GET {{MusicPlayer.Api_HostAddress}}/api/jamendo/tracks/{{jamendoTrackId}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+GET {{MusicPlayer.Api_HostAddress}}/api/jamendo/tracks/{{jamendoTrackId}}/stream
+Authorization: Bearer {{token}}
+
+###

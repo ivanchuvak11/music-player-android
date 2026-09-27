@@ -164,11 +164,13 @@ public class PlaylistsController : ControllerBase
             .ToLowerInvariant();
 
         if (source != "audius" &&
-            source != "youtube")
+            source != "youtube" &&
+            source != "soundcloud" &&
+            source != "jamendo")
         {
             return BadRequest(new
             {
-                message = "Source must be audius or youtube."
+                message = "Source must be audius, youtube, soundcloud or jamendo."
             });
         }
 

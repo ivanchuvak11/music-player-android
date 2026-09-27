@@ -24,6 +24,10 @@ Redis використовується для кешування read-only за�
 
 - Audius search/trending: 5 хвилин
 - Audius track metadata: 30 хвилин
+- SoundCloud search: 5 хвилин
+- SoundCloud track metadata: 30 хвилин
+- Jamendo search: 10 хвилин
+- Jamendo track metadata: 1 година
 - Radio Browser search/popular: 10 хвилин
 - Radio Browser station metadata: 24 години
 
@@ -31,6 +35,8 @@ Redis використовується для кешування read-only за�
 
 - Audius
 - YouTube / YouTube Music
+- SoundCloud
+- Jamendo
 - Internet Radio
 - Local Music
 

@@ -59,6 +59,18 @@ builder.Services.AddHttpClient<AudiusService>(client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
+builder.Services.AddHttpClient<SoundCloudService>(client =>
+{
+    client.BaseAddress = new Uri("https://api.soundcloud.com/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+
+builder.Services.AddHttpClient<JamendoService>(client =>
+{
+    client.BaseAddress = new Uri("https://api.jamendo.com/v3.0/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+
 builder.Services.AddStackExchangeRedisCache(options =>
 {
     options.Configuration =

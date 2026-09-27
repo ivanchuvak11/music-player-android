@@ -71,11 +71,14 @@ public class FavoritesController : ControllerBase
         var source = request.Source.Trim().ToLowerInvariant();
         var externalId = request.ExternalId.Trim();
 
-        if (source != "audius" && source != "youtube")
+        if (source != "audius" &&
+            source != "youtube" &&
+            source != "soundcloud" &&
+            source != "jamendo")
         {
             return BadRequest(new
             {
-                message = "Source must be audius or youtube."
+                message = "Source must be audius, youtube, soundcloud or jamendo."
             });
         }
 
