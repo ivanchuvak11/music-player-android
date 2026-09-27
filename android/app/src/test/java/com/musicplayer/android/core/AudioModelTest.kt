@@ -134,6 +134,18 @@ class AudioModelTest {
     }
 
     @Test
+    fun testPlaybackSpeedInPlaybackState() {
+        val defaultState = PlaybackState()
+        assertEquals(1.0f, defaultState.playbackSpeed, 0.001f)
+
+        val updatedState = defaultState.copy(playbackSpeed = 1.5f)
+        assertEquals(1.5f, updatedState.playbackSpeed, 0.001f)
+
+        val slowState = defaultState.copy(playbackSpeed = 0.75f)
+        assertEquals(0.75f, slowState.playbackSpeed, 0.001f)
+    }
+
+    @Test
     fun testFromJamendoFactory() {
         val jamendoDto = com.musicplayer.android.core.network.JamendoTrackDto(
             externalId = "9988",
@@ -184,5 +196,37 @@ class AudioModelTest {
         assertEquals("audius_aud-456", track.id)
         assertEquals("Audius Beat", track.title)
         assertTrue(track.audioUrl.contains("api/audius/tracks/aud-456/stream"))
+    }
+
+    @Test
+    fun testFromAudiusWithCustomBaseUrl() {
+        val audiusDto = com.musicplayer.android.core.network.AudiusTrackDto(
+            externalId = "aud-789",
+            title = "Physical Device Track",
+            artist = "DJ Test",
+            artworkUrl = "https://example.com/art3.jpg",
+            durationMs = 180000L
+        )
+        val customBaseUrl = "http://192.168.1.100:5116/"
+        val track = AudioTrack.fromAudius(audiusDto, backendBaseUrl = customBaseUrl)
+        assertEquals("http://192.168.1.100:5116/api/audius/tracks/aud-789/stream", track.audioUrl)
+    }
+
+    @Test
+    fun testCachedTrackEntityCreation() {
+        val entity = com.musicplayer.android.core.database.CachedTrackEntity(
+            id = "jamendo_123",
+            title = "Offline Song",
+            artist = "Offline Artist",
+            localFilePath = "/data/cache/123.mp3",
+            originalUrl = "https://example.com/123.mp3",
+            durationMs = 200000L,
+            cachedAtTimestamp = 1711500000000L
+        )
+        assertEquals("jamendo_123", entity.id)
+        assertEquals("Offline Song", entity.title)
+        assertEquals("Offline Artist", entity.artist)
+        assertEquals("/data/cache/123.mp3", entity.localFilePath)
+        assertEquals(1711500000000L, entity.cachedAtTimestamp)
     }
 }

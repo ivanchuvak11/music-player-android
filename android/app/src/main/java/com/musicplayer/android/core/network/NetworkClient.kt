@@ -1,13 +1,16 @@
 package com.musicplayer.android.core.network
 
+import android.content.Context
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
+import okhttp3.Cache
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class AuthInterceptor : Interceptor {
@@ -45,20 +48,42 @@ object NetworkClient {
         encodeDefaults = true
     }
 
-    private val okHttpClient = OkHttpClient.Builder()
-        .addInterceptor(authInterceptor)
-        .addInterceptor(HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
-        })
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
+    @Volatile
+    private var okHttpClient: OkHttpClient? = null
 
-    fun createService(baseUrl: String = DEFAULT_BASE_URL): MusicApiService {
+    fun getOkHttpClient(context: Context? = null): OkHttpClient {
+        return okHttpClient ?: synchronized(this) {
+            okHttpClient ?: run {
+                val builder = OkHttpClient.Builder()
+                    .addInterceptor(authInterceptor)
+                    .addInterceptor(HttpLoggingInterceptor().apply {
+                        level = HttpLoggingInterceptor.Level.BODY
+                    })
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+
+                if (context != null) {
+                    try {
+                        val cacheDir = File(context.cacheDir, "http_cache")
+                        val cacheSize = 10L * 1024 * 1024 // 10 MB
+                        builder.cache(Cache(cacheDir, cacheSize))
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+
+                builder.build().also { okHttpClient = it }
+            }
+        }
+    }
+
+    fun createService(baseUrl: String = DEFAULT_BASE_URL, context: Context? = null): MusicApiService {
         val contentType = "application/json".toMediaType()
+        val client = getOkHttpClient(context)
+        val validBaseUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
         return Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .client(okHttpClient)
+            .baseUrl(validBaseUrl)
+            .client(client)
             .addConverterFactory(json.asConverterFactory(contentType))
             .build()
             .create(MusicApiService::class.java)

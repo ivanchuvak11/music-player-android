@@ -68,10 +68,15 @@ fun PlayerCoreScreen() {
     val radioStations by viewModel.radioStations.collectAsState()
     val radioStationsByCountry by viewModel.radioStationsByCountry.collectAsState()
     val playlists by viewModel.playlists.collectAsState()
-    val cachedTracks by viewModel.cachedTracks.collectAsState()
+    val cachedTracks by viewModel.searchedCachedTracks.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val authStatus by viewModel.authStatusMessage.collectAsState()
+    val isOnline by viewModel.isOnline.collectAsState()
 
+    var audioCacheSizeBytes by remember { mutableStateOf(viewModel.getAudioCacheSizeBytes()) }
+    var serverUrlInput by remember { mutableStateOf(viewModel.getBaseUrl()) }
+    var isServerConfigExpanded by remember { mutableStateOf(false) }
+    var cachedFilterQuery by remember { mutableStateOf("") }
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
@@ -102,17 +107,87 @@ fun PlayerCoreScreen() {
     ) {
         // App Header
         item {
-            Text(
-                text = "🎵 Music Player Core",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                text = "Повна функціональна панель: плеєр, авторизація, радіо, база Room",
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "🎵 Music Player Core",
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Повна функціональна панель: плеєр, авторизація, радіо, база Room",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                AssistChip(
+                    onClick = {},
+                    label = { Text(if (isOnline) "🟢 Онлайн" else "🔴 Офлайн", fontSize = 11.sp) }
+                )
+            }
+        }
+
+        // Server URL Configuration (collapsible for cleaner UI)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isServerConfigExpanded = !isServerConfigExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "🌐 Сервер: ${serverUrlInput.trimEnd('/')}",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = if (isServerConfigExpanded) "▲ Приховати" else "▼ Змінити",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    if (isServerConfigExpanded) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = serverUrlInput,
+                                onValueChange = { serverUrlInput = it },
+                                label = { Text("Base URL сервера") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(onClick = {
+                                viewModel.setBaseUrl(serverUrlInput)
+                                isServerConfigExpanded = false
+                                Toast.makeText(context, "Сервер оновлено: $serverUrlInput", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Text("ОК")
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Active Player Card with Seek Bar
@@ -225,6 +300,25 @@ fun PlayerCoreScreen() {
                                 else -> "🔁 Повтор: Вимк"
                             }
                             Text(repeatText)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Playback Speed control
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Швидкість:", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
+                            val speedLabel = if (speed == 1.0f) "1x" else if (speed == 2.0f) "2x" else "${speed}x"
+                            FilterChip(
+                                selected = playbackState.playbackSpeed == speed,
+                                onClick = { viewModel.setPlaybackSpeed(speed) },
+                                label = { Text(speedLabel, fontSize = 10.sp, maxLines = 1) }
+                            )
                         }
                     }
                 }
@@ -451,13 +545,45 @@ fun PlayerCoreScreen() {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "💾 Офлайн-кеш Room DB (${cachedTracks.size} треків збережено):",
+                        text = "💾 Офлайн-кеш Room DB (${cachedTracks.size} знайдено):",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
-                    if (cachedTracks.isEmpty()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = cachedFilterQuery,
+                        onValueChange = {
+                            cachedFilterQuery = it
+                            viewModel.searchCachedTracks(it)
+                        },
+                        label = { Text("Швидкий пошук у базі Room...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        val cacheMb = audioCacheSizeBytes / (1024 * 1024)
                         Text(
-                            text = "Поки порожньо. Натисніть кнопку «+ Кеш» біля будь-якої пісні.",
+                            text = "Дисковий кеш: $cacheMb МБ",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedButton(onClick = {
+                            viewModel.clearAudioCache()
+                            audioCacheSizeBytes = viewModel.getAudioCacheSizeBytes()
+                            Toast.makeText(context, "Кеш очищено", Toast.LENGTH_SHORT).show()
+                        }) {
+                            Text("🧹 Очистити кеш", fontSize = 11.sp)
+                        }
+                    }
+                    if (cachedTracks.isEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (cachedFilterQuery.isBlank()) "Поки порожньо. Натисніть кнопку «+ Кеш» біля будь-якої пісні." else "Нічого не знайдено за запитом «$cachedFilterQuery»",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

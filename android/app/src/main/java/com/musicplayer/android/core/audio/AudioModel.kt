@@ -135,7 +135,8 @@ data class PlaybackState(
     val hasNext: Boolean = false,
     val hasPrevious: Boolean = false,
     val shuffleModeEnabled: Boolean = false,
-    val repeatMode: Int = REPEAT_MODE_OFF
+    val repeatMode: Int = REPEAT_MODE_OFF,
+    val playbackSpeed: Float = 1.0f
 ) {
     companion object {
         const val REPEAT_MODE_OFF = 0

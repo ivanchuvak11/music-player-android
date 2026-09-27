@@ -17,6 +17,12 @@ class SessionManager(context: Context) {
         private const val KEY_USER_ID = "key_user_id"
         private const val KEY_USERNAME = "key_username"
         private const val KEY_EMAIL = "key_email"
+        private const val KEY_BASE_URL = "key_base_url"
+        private const val KEY_SHUFFLE_MODE = "key_shuffle_mode"
+        private const val KEY_REPEAT_MODE = "key_repeat_mode"
+        private const val KEY_PLAYBACK_SPEED = "key_playback_speed"
+
+        const val DEFAULT_BASE_URL = "http://10.0.2.2:5116/"
     }
 
     fun saveSession(
@@ -55,6 +61,47 @@ class SessionManager(context: Context) {
     }
 
     fun clearSession() {
-        prefs.edit().clear().apply()
+        prefs.edit().apply {
+            remove(KEY_AUTH_TOKEN)
+            remove(KEY_USER_ID)
+            remove(KEY_USERNAME)
+            remove(KEY_EMAIL)
+            apply()
+        }
+    }
+
+    // Server Configuration
+    fun getBaseUrl(): String {
+        return prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
+    }
+
+    fun saveBaseUrl(url: String) {
+        val normalized = if (url.endsWith("/")) url else "$url/"
+        prefs.edit().putString(KEY_BASE_URL, normalized).apply()
+    }
+
+    // Playback Preferences Persistence
+    fun getShuffleMode(): Boolean {
+        return prefs.getBoolean(KEY_SHUFFLE_MODE, false)
+    }
+
+    fun saveShuffleMode(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SHUFFLE_MODE, enabled).apply()
+    }
+
+    fun getRepeatMode(): Int {
+        return prefs.getInt(KEY_REPEAT_MODE, 0)
+    }
+
+    fun saveRepeatMode(repeatMode: Int) {
+        prefs.edit().putInt(KEY_REPEAT_MODE, repeatMode).apply()
+    }
+
+    fun getPlaybackSpeed(): Float {
+        return prefs.getFloat(KEY_PLAYBACK_SPEED, 1.0f)
+    }
+
+    fun savePlaybackSpeed(speed: Float) {
+        prefs.edit().putFloat(KEY_PLAYBACK_SPEED, speed).apply()
     }
 }

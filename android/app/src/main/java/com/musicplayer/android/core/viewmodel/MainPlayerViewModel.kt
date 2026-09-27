@@ -3,6 +3,7 @@ package com.musicplayer.android.core.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.musicplayer.android.core.audio.AudioCacheManager
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.LocalAudioScanner
 import com.musicplayer.android.core.audio.PlaybackState
@@ -20,15 +21,18 @@ import com.musicplayer.android.core.network.JamendoTrackDto
 import com.musicplayer.android.core.network.LoginRequestDto
 import com.musicplayer.android.core.network.MusicApiService
 import com.musicplayer.android.core.network.NetworkClient
+import com.musicplayer.android.core.network.NetworkConnectivityObserver
 import com.musicplayer.android.core.network.PlaylistDetailDto
 import com.musicplayer.android.core.network.PlaylistSummaryDto
 import com.musicplayer.android.core.network.RadioStationDto
 import com.musicplayer.android.core.network.RegisterRequestDto
 import com.musicplayer.android.core.session.SessionManager
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -39,19 +43,30 @@ import kotlinx.coroutines.launch
 class MainPlayerViewModel(
     application: Application,
     private val playerController: PlayerController = PlayerControllerImpl(application),
-    private val apiService: MusicApiService = NetworkClient.createService(),
+    private var apiService: MusicApiService = NetworkClient.createService(
+        baseUrl = SessionManager(application).getBaseUrl(),
+        context = application
+    ),
     private val sessionManager: SessionManager = SessionManager(application)
 ) : AndroidViewModel(application) {
 
     constructor(application: Application) : this(
         application,
         PlayerControllerImpl(application),
-        NetworkClient.createService(),
+        NetworkClient.createService(
+            baseUrl = SessionManager(application).getBaseUrl(),
+            context = application
+        ),
         SessionManager(application)
     )
 
     private val db = AppDatabase.getDatabase(application)
     private val localScanner = LocalAudioScanner(application)
+    private val connectivityObserver = NetworkConnectivityObserver(application)
+
+    // Real-time network connectivity
+    val isOnline: StateFlow<Boolean> = connectivityObserver.observe()
+        .stateIn(viewModelScope, SharingStarted.Lazily, connectivityObserver.isCurrentlyConnected())
 
     // Playback state directly from Audio Engine
     val playbackState: StateFlow<PlaybackState> = playerController.playbackState
@@ -91,6 +106,24 @@ class MainPlayerViewModel(
         .getAllCachedTracks()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    private val _cachedSearchQuery = MutableStateFlow("")
+    val cachedSearchQuery: StateFlow<String> = _cachedSearchQuery.asStateFlow()
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val searchedCachedTracks: StateFlow<List<CachedTrackEntity>> = _cachedSearchQuery
+        .flatMapLatest { query ->
+            if (query.isBlank()) {
+                db.cachedTrackDao().getAllCachedTracks()
+            } else {
+                db.cachedTrackDao().searchCachedTracks(query.trim())
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    fun searchCachedTracks(query: String) {
+        _cachedSearchQuery.value = query
+    }
+
     // Auth & User Management
     private val _currentUser = MutableStateFlow<String?>(null)
     val currentUser: StateFlow<String?> = _currentUser.asStateFlow()
@@ -105,6 +138,20 @@ class MainPlayerViewModel(
         // Wire automatic 401 Unauthorized handling
         NetworkClient.authInterceptor.onUnauthorizedListener = {
             handleSessionExpired()
+        }
+
+        // Restore saved player preferences
+        val savedShuffle = sessionManager.getShuffleMode()
+        val savedRepeat = sessionManager.getRepeatMode()
+        val savedSpeed = sessionManager.getPlaybackSpeed()
+        if (savedShuffle) {
+            playerController.setShuffleMode(savedShuffle)
+        }
+        if (savedRepeat != PlaybackState.REPEAT_MODE_OFF) {
+            playerController.setRepeatMode(savedRepeat)
+        }
+        if (savedSpeed != 1.0f) {
+            playerController.setPlaybackSpeed(savedSpeed)
         }
 
         // Restore saved session on launch
@@ -155,9 +202,58 @@ class MainPlayerViewModel(
     fun playNext() = playerController.playNext()
     fun playPrevious() = playerController.playPrevious()
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
-    fun toggleShuffle() = playerController.toggleShuffle()
-    fun setRepeatMode(repeatMode: Int) = playerController.setRepeatMode(repeatMode)
-    fun cycleRepeatMode() = playerController.cycleRepeatMode()
+
+    fun toggleShuffle() {
+        val nextMode = !playbackState.value.shuffleModeEnabled
+        playerController.setShuffleMode(nextMode)
+        sessionManager.saveShuffleMode(nextMode)
+    }
+
+    fun setShuffleMode(enabled: Boolean) {
+        playerController.setShuffleMode(enabled)
+        sessionManager.saveShuffleMode(enabled)
+    }
+
+    fun setRepeatMode(repeatMode: Int) {
+        playerController.setRepeatMode(repeatMode)
+        sessionManager.saveRepeatMode(repeatMode)
+    }
+
+    fun cycleRepeatMode() {
+        val nextMode = when (playbackState.value.repeatMode) {
+            PlaybackState.REPEAT_MODE_OFF -> PlaybackState.REPEAT_MODE_ALL
+            PlaybackState.REPEAT_MODE_ALL -> PlaybackState.REPEAT_MODE_ONE
+            else -> PlaybackState.REPEAT_MODE_OFF
+        }
+        setRepeatMode(nextMode)
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        playerController.setPlaybackSpeed(speed)
+        sessionManager.savePlaybackSpeed(speed)
+    }
+
+    // Audio Cache Management
+    fun getAudioCacheSizeBytes(): Long {
+        return AudioCacheManager.getCacheSizeBytes(getApplication())
+    }
+
+    fun clearAudioCache() {
+        AudioCacheManager.clearCache(getApplication())
+    }
+
+    // Dynamic Server Base URL Configuration
+    fun setBaseUrl(newUrl: String) {
+        val normalized = if (newUrl.endsWith("/")) newUrl else "$newUrl/"
+        sessionManager.saveBaseUrl(normalized)
+        apiService = NetworkClient.createService(normalized, getApplication())
+        if (sessionManager.isLoggedIn()) {
+            validateSession()
+            loadBackendData()
+        }
+    }
+
+    fun getBaseUrl(): String = sessionManager.getBaseUrl()
 
     fun playTrack(track: AudioTrack) {
         playerController.playTrack(track)
@@ -180,7 +276,7 @@ class MainPlayerViewModel(
         playQueue(audioTracks, startIndex)
     }
 
-    fun playAudiusTrack(track: AudiusTrackDto, baseUrl: String = NetworkClient.DEFAULT_BASE_URL) {
+    fun playAudiusTrack(track: AudiusTrackDto, baseUrl: String = sessionManager.getBaseUrl()) {
         playTrack(AudioTrack.fromAudius(track, baseUrl))
     }
 

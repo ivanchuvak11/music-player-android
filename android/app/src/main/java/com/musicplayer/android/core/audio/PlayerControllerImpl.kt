@@ -34,6 +34,9 @@ class PlayerControllerImpl(
 
     private var currentQueue: List<AudioTrack> = emptyList()
     private var progressJob: Job? = null
+    private var pendingShuffleMode: Boolean? = null
+    private var pendingRepeatMode: Int? = null
+    private var pendingPlaybackSpeed: Float? = null
 
     init {
         initializeController()
@@ -46,6 +49,15 @@ class PlayerControllerImpl(
             try {
                 mediaController = controllerFuture?.get()
                 setupPlayerListener()
+                pendingShuffleMode?.let { mediaController?.shuffleModeEnabled = it }
+                pendingRepeatMode?.let { mode ->
+                    mediaController?.repeatMode = when (mode) {
+                        PlaybackState.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE
+                        PlaybackState.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ALL
+                        else -> Player.REPEAT_MODE_OFF
+                    }
+                }
+                pendingPlaybackSpeed?.let { mediaController?.setPlaybackSpeed(it) }
                 updateState()
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -77,6 +89,10 @@ class PlayerControllerImpl(
             }
 
             override fun onRepeatModeChanged(repeatMode: Int) {
+                updateState()
+            }
+
+            override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
                 updateState()
             }
         })
@@ -129,7 +145,8 @@ class PlayerControllerImpl(
             hasNext = controller.hasNextMediaItem(),
             hasPrevious = controller.hasPreviousMediaItem(),
             shuffleModeEnabled = controller.shuffleModeEnabled,
-            repeatMode = mappedRepeatMode
+            repeatMode = mappedRepeatMode,
+            playbackSpeed = controller.playbackParameters.speed
         )
     }
 
@@ -171,20 +188,34 @@ class PlayerControllerImpl(
         setQueue(listOf(track), startIndex = 0, autoPlay = true)
     }
 
+    override fun setShuffleMode(enabled: Boolean) {
+        val controller = mediaController
+        if (controller != null) {
+            controller.shuffleModeEnabled = enabled
+            updateState()
+        } else {
+            pendingShuffleMode = enabled
+            _playbackState.value = _playbackState.value.copy(shuffleModeEnabled = enabled)
+        }
+    }
+
     override fun toggleShuffle() {
-        val controller = mediaController ?: return
-        controller.shuffleModeEnabled = !controller.shuffleModeEnabled
-        updateState()
+        setShuffleMode(!_playbackState.value.shuffleModeEnabled)
     }
 
     override fun setRepeatMode(repeatMode: Int) {
-        val controller = mediaController ?: return
-        controller.repeatMode = when (repeatMode) {
-            PlaybackState.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE
-            PlaybackState.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ALL
-            else -> Player.REPEAT_MODE_OFF
+        val controller = mediaController
+        if (controller != null) {
+            controller.repeatMode = when (repeatMode) {
+                PlaybackState.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE
+                PlaybackState.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ALL
+                else -> Player.REPEAT_MODE_OFF
+            }
+            updateState()
+        } else {
+            pendingRepeatMode = repeatMode
+            _playbackState.value = _playbackState.value.copy(repeatMode = repeatMode)
         }
-        updateState()
     }
 
     override fun cycleRepeatMode() {
@@ -194,6 +225,17 @@ class PlayerControllerImpl(
             else -> PlaybackState.REPEAT_MODE_OFF
         }
         setRepeatMode(nextMode)
+    }
+
+    override fun setPlaybackSpeed(speed: Float) {
+        val controller = mediaController
+        if (controller != null) {
+            controller.setPlaybackSpeed(speed)
+            updateState()
+        } else {
+            pendingPlaybackSpeed = speed
+            _playbackState.value = _playbackState.value.copy(playbackSpeed = speed)
+        }
     }
 
     override fun release() {

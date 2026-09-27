@@ -15,8 +15,10 @@ interface PlayerController {
     fun seekTo(positionMs: Long)
     fun setQueue(tracks: List<AudioTrack>, startIndex: Int = 0, autoPlay: Boolean = true)
     fun playTrack(track: AudioTrack)
+    fun setShuffleMode(enabled: Boolean)
     fun toggleShuffle()
     fun setRepeatMode(repeatMode: Int)
     fun cycleRepeatMode()
+    fun setPlaybackSpeed(speed: Float)
     fun release()
 }

@@ -54,6 +54,29 @@ object AudioCacheManager {
         }
     }
 
+    fun getCacheSizeBytes(context: Context): Long {
+        return try {
+            getCache(context).cacheSpace
+        } catch (e: Exception) {
+            val cacheDir = File(context.cacheDir, "media_cache")
+            if (cacheDir.exists()) cacheDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum() else 0L
+        }
+    }
+
+    @Synchronized
+    fun clearCache(context: Context) {
+        try {
+            simpleCache?.let { cache ->
+                val keys = cache.keys
+                for (key in keys) {
+                    cache.removeResource(key)
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     @Synchronized
     fun releaseCache() {
         simpleCache?.release()
