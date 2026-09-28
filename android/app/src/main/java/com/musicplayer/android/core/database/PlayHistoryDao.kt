@@ -19,4 +19,12 @@ interface PlayHistoryDao {
 
     @Query("DELETE FROM play_history")
     suspend fun clearAllHistory()
+
+    // M5 FIX: Get last position for a specific track to resume playback
+    @Query("SELECT lastPositionMs FROM play_history WHERE trackId = :trackId ORDER BY playedAtTimestamp DESC LIMIT 1")
+    suspend fun getLastPosition(trackId: String): Long?
+
+    // M8 FIX: Trim old history entries to prevent unbounded growth (keep most recent 500)
+    @Query("DELETE FROM play_history WHERE historyId NOT IN (SELECT historyId FROM play_history ORDER BY playedAtTimestamp DESC LIMIT 500)")
+    suspend fun trimOldHistory()
 }

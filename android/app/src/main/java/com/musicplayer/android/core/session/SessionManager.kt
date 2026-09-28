@@ -4,12 +4,13 @@ import android.content.Context
 import android.content.SharedPreferences
 
 /**
- * Manages persistent user session, JWT authentication token, and credentials
- * stored in SharedPreferences.
+ * Manages persistent user session, authentication token, playback preferences,
+ * and equalizer state stored safely in SharedPreferences.
  */
 class SessionManager(context: Context) {
 
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences =
+        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     companion object {
         private const val PREFS_NAME = "music_player_session_prefs"
@@ -21,7 +22,28 @@ class SessionManager(context: Context) {
         private const val KEY_SHUFFLE_MODE = "key_shuffle_mode"
         private const val KEY_REPEAT_MODE = "key_repeat_mode"
 
+        // Equalizer persistence keys
+        private const val KEY_EQ_ENABLED = "key_eq_enabled"
+        private const val KEY_EQ_PRESET = "key_eq_preset"
+        private const val KEY_EQ_BASS_BOOST = "key_eq_bass_boost"
+        private const val KEY_EQ_BAND_PREFIX = "key_eq_band_"
+
+        // Resume position persistence
+        private const val KEY_LAST_TRACK_ID = "key_last_track_id"
+        private const val KEY_LAST_POSITION_MS = "key_last_position_ms"
+
         const val DEFAULT_BASE_URL = "http://10.0.2.2:5116/"
+
+        @Volatile
+        private var INSTANCE: SessionManager? = null
+
+        fun getInstance(context: Context): SessionManager {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: SessionManager(context.applicationContext).also {
+                    INSTANCE = it
+                }
+            }
+        }
     }
 
     fun saveSession(
@@ -76,6 +98,7 @@ class SessionManager(context: Context) {
 
     fun saveBaseUrl(url: String) {
         val normalized = if (url.endsWith("/")) url else "$url/"
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) return
         prefs.edit().putString(KEY_BASE_URL, normalized).apply()
     }
 
@@ -95,4 +118,41 @@ class SessionManager(context: Context) {
     fun saveRepeatMode(repeatMode: Int) {
         prefs.edit().putInt(KEY_REPEAT_MODE, repeatMode).apply()
     }
+
+    // Equalizer State Persistence
+    fun saveEqualizerState(enabled: Boolean, preset: String, bassBoost: Short, bandLevels: Map<Short, Short>) {
+        prefs.edit().apply {
+            putBoolean(KEY_EQ_ENABLED, enabled)
+            putString(KEY_EQ_PRESET, preset)
+            putInt(KEY_EQ_BASS_BOOST, bassBoost.toInt())
+            bandLevels.forEach { (band, level) ->
+                putInt("${KEY_EQ_BAND_PREFIX}$band", level.toInt())
+            }
+            apply()
+        }
+    }
+
+    fun getEqualizerEnabled(): Boolean = prefs.getBoolean(KEY_EQ_ENABLED, false)
+    fun getEqualizerPreset(): String = prefs.getString(KEY_EQ_PRESET, "Звичайний") ?: "Звичайний"
+    fun getEqualizerBassBoost(): Short = prefs.getInt(KEY_EQ_BASS_BOOST, 0).toShort()
+    fun getEqualizerBandLevels(numberOfBands: Int = 5): Map<Short, Short> {
+        val map = mutableMapOf<Short, Short>()
+        for (i in 0 until numberOfBands) {
+            val band = i.toShort()
+            map[band] = prefs.getInt("${KEY_EQ_BAND_PREFIX}$band", 0).toShort()
+        }
+        return map
+    }
+
+    // Resume position persistence
+    fun saveLastPlaybackPosition(trackId: String, positionMs: Long) {
+        prefs.edit().apply {
+            putString(KEY_LAST_TRACK_ID, trackId)
+            putLong(KEY_LAST_POSITION_MS, positionMs)
+            apply()
+        }
+    }
+
+    fun getLastTrackId(): String? = prefs.getString(KEY_LAST_TRACK_ID, null)
+    fun getLastPositionMs(): Long = prefs.getLong(KEY_LAST_POSITION_MS, 0L)
 }

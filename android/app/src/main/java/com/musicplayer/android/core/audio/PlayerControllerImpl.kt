@@ -303,6 +303,26 @@ class PlayerControllerImpl(
         setRepeatMode(nextMode)
     }
 
+    override fun setPlaybackSpeed(speed: Float) {
+        val clampedSpeed = speed.coerceIn(0.25f, 3.0f)
+        mediaController?.setPlaybackSpeed(clampedSpeed)
+    }
+
+    override fun addToQueue(track: AudioTrack) {
+        currentQueue = currentQueue + track
+        mediaController?.addMediaItem(track.toMediaItem())
+        updateState()
+    }
+
+    override fun removeFromQueue(index: Int) {
+        val controller = mediaController ?: return
+        if (index in 0 until controller.mediaItemCount) {
+            currentQueue = currentQueue.toMutableList().apply { removeAt(index) }
+            controller.removeMediaItem(index)
+            updateState()
+        }
+    }
+
     override fun release() {
         fadeJob?.cancel()
         stopProgressTracker()

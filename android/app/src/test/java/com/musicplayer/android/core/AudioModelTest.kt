@@ -288,4 +288,36 @@ class AudioModelTest {
         val recoveredState = errorState.copy(errorMessage = null)
         assertNull(recoveredState.errorMessage)
     }
+
+    @Test
+    fun testPlayHistoryEntityWithLastPosition() {
+        val history = com.musicplayer.android.core.database.PlayHistoryEntity(
+            historyId = 2L,
+            trackId = "track_pos_1",
+            title = "Resume Track",
+            artist = "Resume Artist",
+            audioUrl = "https://example.com/pos.mp3",
+            artworkUrl = null,
+            durationMs = 300000L,
+            lastPositionMs = 145000L,
+            playedAtTimestamp = 1711800000000L
+        )
+        assertEquals(145000L, history.lastPositionMs)
+        assertEquals("track_pos_1", history.trackId)
+    }
+
+    @Test
+    fun testSleepTimerInitialStateAndCancel() {
+        com.musicplayer.android.core.audio.SleepTimer.cancel()
+        assertFalse(com.musicplayer.android.core.audio.SleepTimer.isActive.value)
+        assertEquals(0L, com.musicplayer.android.core.audio.SleepTimer.remainingSeconds.value)
+    }
+
+    @Test
+    fun testAudioEffectsStateLoudness() {
+        val state = com.musicplayer.android.core.audio.AudioEffectsState(
+            loudnessEnhancerGainMb = 500
+        )
+        assertEquals(500, state.loudnessEnhancerGainMb)
+    }
 }
