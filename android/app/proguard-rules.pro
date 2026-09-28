@@ -2,9 +2,16 @@
 # By default, the flags in this file are appended to flags specified
 # in defaultProguardFile("proguard-android-optimize.txt")
 
-# Room
+# Room (Database, DAOs, Entities)
 -keep class * extends androidx.room.RoomDatabase
+-keep class com.musicplayer.android.core.database.** { *; }
+-keep @androidx.room.Entity class * { *; }
+-keep @androidx.room.Dao interface * { *; }
 -dontwarn androidx.room.paging.**
+
+# Audio Engine & Core Network Models
+-keep class com.musicplayer.android.core.audio.** { *; }
+-keep class com.musicplayer.android.core.network.** { *; }
 
 # Kotlinx Serialization
 -keepattributes *Annotation*,InnerClasses

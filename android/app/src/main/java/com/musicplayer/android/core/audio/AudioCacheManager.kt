@@ -24,9 +24,23 @@ object AudioCacheManager {
     fun getCache(context: Context): SimpleCache {
         if (simpleCache == null) {
             val cacheDir = File(context.cacheDir, "media_cache")
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs()
+            }
             val evictor = LeastRecentlyUsedCacheEvictor(MAX_CACHE_SIZE)
             val databaseProvider = StandaloneDatabaseProvider(context)
-            simpleCache = SimpleCache(cacheDir, evictor, databaseProvider)
+            try {
+                simpleCache = SimpleCache(cacheDir, evictor, databaseProvider)
+            } catch (e: Exception) {
+                e.printStackTrace()
+                if (SimpleCache.isCacheFolderLocked(cacheDir)) {
+                    val altCacheDir = File(context.cacheDir, "media_cache_alt")
+                    if (!altCacheDir.exists()) altCacheDir.mkdirs()
+                    simpleCache = SimpleCache(altCacheDir, evictor, databaseProvider)
+                } else {
+                    throw e
+                }
+            }
         }
         return simpleCache!!
     }
@@ -66,10 +80,16 @@ object AudioCacheManager {
     @Synchronized
     fun clearCache(context: Context) {
         try {
-            simpleCache?.let { cache ->
+            val cache = simpleCache
+            if (cache != null) {
                 val keys = cache.keys
                 for (key in keys) {
                     cache.removeResource(key)
+                }
+            } else {
+                val cacheDir = File(context.cacheDir, "media_cache")
+                if (cacheDir.exists()) {
+                    cacheDir.deleteRecursively()
                 }
             }
         } catch (e: Exception) {

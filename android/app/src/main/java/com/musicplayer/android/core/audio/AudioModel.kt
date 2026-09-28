@@ -44,6 +44,7 @@ data class AudioTrack(
             val uri = mediaItem.localConfiguration?.uri
             val uriString = uri?.toString().orEmpty()
             val isLocal = uri?.scheme == "content" || uri?.scheme == "file"
+            val isLive = mediaItem.mediaId.startsWith("radio_") || (durationMs <= 0L && !isLocal && uriString.contains("radio"))
             return AudioTrack(
                 id = mediaItem.mediaId,
                 title = metadata.title?.toString() ?: "Unknown Title",
@@ -52,12 +53,11 @@ data class AudioTrack(
                 artworkUrl = metadata.artworkUri?.toString(),
                 durationMs = durationMs,
                 isLocal = isLocal,
-                isLiveStream = durationMs <= 0L && !isLocal
+                isLiveStream = isLive
             )
         }
 
         fun fromJamendo(track: JamendoTrackDto, backendBaseUrl: String = "http://10.0.2.2:5116/"): AudioTrack {
-            // Prefer direct CDN stream if available, otherwise fallback to backend proxy stream endpoint
             val streamUri = if (!track.streamUrl.isNullOrBlank()) {
                 track.streamUrl
             } else {
@@ -136,7 +136,7 @@ data class PlaybackState(
     val hasPrevious: Boolean = false,
     val shuffleModeEnabled: Boolean = false,
     val repeatMode: Int = REPEAT_MODE_OFF,
-    val playbackSpeed: Float = 1.0f
+    val errorMessage: String? = null
 ) {
     companion object {
         const val REPEAT_MODE_OFF = 0

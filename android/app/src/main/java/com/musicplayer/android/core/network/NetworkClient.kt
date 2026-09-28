@@ -1,6 +1,7 @@
 package com.musicplayer.android.core.network
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 import okhttp3.Cache
@@ -54,10 +55,22 @@ object NetworkClient {
     fun getOkHttpClient(context: Context? = null): OkHttpClient {
         return okHttpClient ?: synchronized(this) {
             okHttpClient ?: run {
+                val isDebug = try {
+                    context != null && (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                } catch (e: Exception) {
+                    false
+                }
+
+                val loggingLevel = if (isDebug) {
+                    HttpLoggingInterceptor.Level.BODY
+                } else {
+                    HttpLoggingInterceptor.Level.NONE
+                }
+
                 val builder = OkHttpClient.Builder()
                     .addInterceptor(authInterceptor)
                     .addInterceptor(HttpLoggingInterceptor().apply {
-                        level = HttpLoggingInterceptor.Level.BODY
+                        level = loggingLevel
                     })
                     .connectTimeout(15, TimeUnit.SECONDS)
                     .readTimeout(15, TimeUnit.SECONDS)

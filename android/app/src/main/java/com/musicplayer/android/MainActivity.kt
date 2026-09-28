@@ -24,6 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.musicplayer.android.core.audio.AudioEffectsState
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.PlaybackState
 import com.musicplayer.android.core.database.CachedTrackEntity
@@ -73,9 +74,14 @@ fun PlayerCoreScreen() {
     val authStatus by viewModel.authStatusMessage.collectAsState()
     val isOnline by viewModel.isOnline.collectAsState()
 
+    val audioEffectsState by viewModel.audioEffectsState.collectAsState()
+    val localFavorites by viewModel.localFavorites.collectAsState()
+    val playHistory by viewModel.playHistory.collectAsState()
+
     var audioCacheSizeBytes by remember { mutableStateOf(viewModel.getAudioCacheSizeBytes()) }
     var serverUrlInput by remember { mutableStateOf(viewModel.getBaseUrl()) }
     var isServerConfigExpanded by remember { mutableStateOf(false) }
+    var isEqualizerExpanded by remember { mutableStateOf(false) }
     var cachedFilterQuery by remember { mutableStateOf("") }
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
@@ -97,6 +103,25 @@ fun PlayerCoreScreen() {
 
     LaunchedEffect(Unit) {
         viewModel.loadLocalTracks()
+    }
+
+    LaunchedEffect(playbackState.errorMessage) {
+        val error = playbackState.errorMessage
+        if (!error.isNullOrBlank()) {
+            Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val playOnlineSafely: (() -> Unit) -> Unit = { action ->
+        if (isOnline) {
+            action()
+        } else {
+            Toast.makeText(
+                context,
+                "📡 Немає зв'язку з інтернетом. Ви можете слухати музику з пристрою чи збережений Room-кеш офлайн!",
+                Toast.LENGTH_LONG
+            ).show()
+        }
     }
 
     LazyColumn(
@@ -129,6 +154,51 @@ fun PlayerCoreScreen() {
                     onClick = {},
                     label = { Text(if (isOnline) "🟢 Онлайн" else "🔴 Офлайн", fontSize = 11.sp) }
                 )
+            }
+        }
+
+        // Status Banner: Network Error or Offline Mode
+        if (playbackState.errorMessage != null) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⚠️", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = playbackState.errorMessage ?: "",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+        } else if (!isOnline) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📡", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Ви зараз офлайн. Треки з пам'яті телефону та кеш Room доступні без інтернету!",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
 
@@ -198,36 +268,57 @@ fun PlayerCoreScreen() {
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Зараз грає:",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = playbackState.currentTrack?.title ?: "Трек не вибрано",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = playbackState.currentTrack?.artist ?: "Оберіть пісню зі списку нижче",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Зараз грає:",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = playbackState.currentTrack?.title ?: "Трек не вибрано",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = playbackState.currentTrack?.artist ?: "Оберіть пісню зі списку нижче",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        playbackState.currentTrack?.let { track ->
+                            val isFav = localFavorites.any { it.id == track.id }
+                            IconButton(onClick = { viewModel.toggleLocalFavorite(track) }) {
+                                Text(if (isFav) "❤️" else "🤍", fontSize = 22.sp)
+                            }
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Interactive Seek Slider
+                    // Interactive Seek Slider with smooth preview to avoid audio stuttering
+                    var userSeekingPosition by remember { mutableStateOf<Float?>(null) }
+                    val currentPos = userSeekingPosition ?: playbackState.currentPositionMs.toFloat()
+
                     if (playbackState.durationMs > 0L) {
                         Slider(
-                            value = playbackState.currentPositionMs.toFloat().coerceIn(0f, playbackState.durationMs.toFloat()),
+                            value = currentPos.coerceIn(0f, playbackState.durationMs.toFloat()),
                             valueRange = 0f..playbackState.durationMs.toFloat(),
                             onValueChange = { newPos ->
-                                viewModel.seekTo(newPos.toLong())
+                                userSeekingPosition = newPos
+                            },
+                            onValueChangeFinished = {
+                                userSeekingPosition?.let { viewModel.seekTo(it.toLong()) }
+                                userSeekingPosition = null
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -242,6 +333,7 @@ fun PlayerCoreScreen() {
                     ) {
                         Text(
                             text = when {
+                                playbackState.errorMessage != null -> "⚠️ Збій мережі"
                                 playbackState.isBuffering -> "⏳ Буферизація..."
                                 playbackState.isPlaying -> "▶ Відтворення"
                                 playbackState.currentTrack != null -> "⏸ На паузі"
@@ -250,8 +342,9 @@ fun PlayerCoreScreen() {
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
+                        val displayedPos = userSeekingPosition?.toLong() ?: playbackState.currentPositionMs
                         Text(
-                            text = "${formatDuration(playbackState.currentPositionMs)} / ${formatDuration(playbackState.durationMs)}",
+                            text = "${formatDuration(displayedPos)} / ${formatDuration(playbackState.durationMs)}",
                             fontSize = 12.sp
                         )
                     }
@@ -302,23 +395,130 @@ fun PlayerCoreScreen() {
                             Text(repeatText)
                         }
                     }
+                }
+            }
+        }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Playback Speed control
+        // Section: Hardware Equalizer & Sound Effects
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isEqualizerExpanded = !isEqualizerExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Швидкість:", fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                        listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f).forEach { speed ->
-                            val speedLabel = if (speed == 1.0f) "1x" else if (speed == 2.0f) "2x" else "${speed}x"
-                            FilterChip(
-                                selected = playbackState.playbackSpeed == speed,
-                                onClick = { viewModel.setPlaybackSpeed(speed) },
-                                label = { Text(speedLabel, fontSize = 10.sp, maxLines = 1) }
+                        Text(
+                            text = "🎚 Еквалайзер та Ефекти",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (audioEffectsState.isEnabled) "Увімк: ${audioEffectsState.currentPreset}" else "Вимкнено",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(text = if (isEqualizerExpanded) "▲" else "▼", fontSize = 12.sp)
+                        }
+                    }
+
+                    if (isEqualizerExpanded) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Увімкнути еквалайзер:", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Switch(
+                                checked = audioEffectsState.isEnabled,
+                                onCheckedChange = { viewModel.setEqualizerEnabled(it) }
+                            )
+                        }
+
+                        if (audioEffectsState.isEnabled) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text("Пресети звучання:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                AudioEffectsState.AVAILABLE_PRESETS.take(3).forEach { preset ->
+                                    FilterChip(
+                                        selected = audioEffectsState.currentPreset == preset,
+                                        onClick = { viewModel.setEqualizerPreset(preset) },
+                                        label = { Text(preset, fontSize = 10.sp) }
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                AudioEffectsState.AVAILABLE_PRESETS.drop(3).forEach { preset ->
+                                    FilterChip(
+                                        selected = audioEffectsState.currentPreset == preset,
+                                        onClick = { viewModel.setEqualizerPreset(preset) },
+                                        label = { Text(preset, fontSize = 10.sp) }
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Підсилення басу (Bass Boost):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("${audioEffectsState.bassBoostStrength / 10}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
+                            Slider(
+                                value = audioEffectsState.bassBoostStrength.toFloat(),
+                                onValueChange = { viewModel.setBassBoostStrength(it.toInt().toShort()) },
+                                valueRange = 0f..1000f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("Смуги частот (5-смуговий Еквалайзер):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            for (i in 0 until audioEffectsState.numberOfBands) {
+                                val band = i.toShort()
+                                val level = audioEffectsState.bandLevels[band] ?: 0.toShort()
+                                val label = AudioEffectsState.BAND_LABELS[band] ?: "Смуга ${i + 1}"
+                                val dbValue = level.toFloat() / 100f
+                                val dbText = if (dbValue >= 0f) "+${"%.1f".format(dbValue)} dB" else "${"%.1f".format(dbValue)} dB"
+
+                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                                        Text(dbText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                    Slider(
+                                        value = level.toFloat().coerceIn(audioEffectsState.minBandLevel.toFloat(), audioEffectsState.maxBandLevel.toFloat()),
+                                        onValueChange = { newLevel ->
+                                            viewModel.setEqualizerBandLevel(band, newLevel.toInt().toShort())
+                                        },
+                                        valueRange = audioEffectsState.minBandLevel.toFloat()..audioEffectsState.maxBandLevel.toFloat(),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -528,7 +728,7 @@ fun PlayerCoreScreen() {
             items(localTracks) { track ->
                 TrackItemRow(
                     track = track,
-                    onPlay = { viewModel.playTrack(track) },
+                    onPlay = { viewModel.playLocalTrack(track) },
                     onCache = {
                         viewModel.cacheTrack(track)
                         Toast.makeText(context, "Збережено в Room офлайн-кеш!", Toast.LENGTH_SHORT).show()
@@ -596,20 +796,83 @@ fun PlayerCoreScreen() {
             CachedTrackRow(
                 cached = cached,
                 onPlay = {
-                    val track = AudioTrack(
-                        id = cached.id,
-                        title = cached.title,
-                        artist = cached.artist,
-                        audioUrl = cached.localFilePath ?: cached.originalUrl,
-                        durationMs = cached.durationMs,
-                        isLocal = cached.localFilePath != null
-                    )
-                    viewModel.playTrack(track)
+                    val tracks = cachedTracks.map { c ->
+                        AudioTrack(
+                            id = c.id,
+                            title = c.title,
+                            artist = c.artist,
+                            audioUrl = c.localFilePath ?: c.originalUrl,
+                            durationMs = c.durationMs,
+                            isLocal = c.localFilePath != null
+                        )
+                    }
+                    val index = cachedTracks.indexOfFirst { it.id == cached.id }.coerceAtLeast(0)
+                    viewModel.playQueue(tracks, index)
                 },
                 onDelete = {
                     viewModel.removeCachedTrack(cached.id)
                 }
             )
+        }
+
+        // Section: Recently Played History (Історія прослуховувань)
+        if (playHistory.isNotEmpty()) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "📜 Нещодавно прослухані (${playHistory.size})",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            TextButton(onClick = { viewModel.clearPlayHistory() }) {
+                                Text("Очистити", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+            items(playHistory.take(5)) { histItem ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            val track = AudioTrack(
+                                id = histItem.trackId,
+                                title = histItem.title,
+                                artist = histItem.artist,
+                                audioUrl = histItem.audioUrl,
+                                artworkUrl = histItem.artworkUrl,
+                                durationMs = histItem.durationMs
+                            )
+                            viewModel.playTrack(track)
+                        },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(histItem.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(histItem.artist, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Text(formatDuration(histItem.durationMs), fontSize = 11.sp)
+                    }
+                }
+            }
         }
 
         // Section: Audius Search (Пошук онлайн-музики)
@@ -663,7 +926,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playAudiusTrack(audiusTrack) },
+                        .clickable { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -674,7 +937,7 @@ fun PlayerCoreScreen() {
                             Text(text = audiusTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
                             Text(text = audiusTrack.artist, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Button(onClick = { viewModel.playAudiusTrack(audiusTrack) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } }) {
                             Text("▶")
                         }
                     }
@@ -733,7 +996,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playJamendoTrack(jamendoTrack) },
+                        .clickable { playOnlineSafely { viewModel.playJamendoTrack(jamendoTrack) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -748,7 +1011,7 @@ fun PlayerCoreScreen() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Button(onClick = { viewModel.playJamendoTrack(jamendoTrack) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playJamendoTrack(jamendoTrack) } }) {
                             Text("▶")
                         }
                     }
@@ -793,7 +1056,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playRadioStation(station) },
+                        .clickable { playOnlineSafely { viewModel.playRadioStation(station) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -808,7 +1071,7 @@ fun PlayerCoreScreen() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Button(onClick = { viewModel.playRadioStation(station) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playRadioStation(station) } }) {
                             Text("▶")
                         }
                     }
@@ -910,7 +1173,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playAudiusTrack(audiusTrack) },
+                        .clickable { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -921,7 +1184,7 @@ fun PlayerCoreScreen() {
                             Text(text = audiusTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
                             Text(text = audiusTrack.artist, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Button(onClick = { viewModel.playAudiusTrack(audiusTrack) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } }) {
                             Text("▶")
                         }
                     }
@@ -942,7 +1205,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playRadioStation(station) },
+                        .clickable { playOnlineSafely { viewModel.playRadioStation(station) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -953,7 +1216,7 @@ fun PlayerCoreScreen() {
                             Text(text = station.name, fontWeight = FontWeight.Medium, maxLines = 1)
                             Text(text = station.genre ?: "Online Radio", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Button(onClick = { viewModel.playRadioStation(station) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playRadioStation(station) } }) {
                             Text("📻")
                         }
                     }

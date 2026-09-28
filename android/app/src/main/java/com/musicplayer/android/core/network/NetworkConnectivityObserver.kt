@@ -55,7 +55,11 @@ class NetworkConnectivityObserver(
         connectivityManager.registerNetworkCallback(request, callback)
 
         awaitClose {
-            connectivityManager.unregisterNetworkCallback(callback)
+            try {
+                connectivityManager.unregisterNetworkCallback(callback)
+            } catch (e: Exception) {
+                // Ignore if already unregistered or system service disconnected
+            }
         }
     }.distinctUntilChanged()
 

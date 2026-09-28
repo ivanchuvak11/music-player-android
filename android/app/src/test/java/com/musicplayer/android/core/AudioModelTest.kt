@@ -133,17 +133,6 @@ class AudioModelTest {
         assertEquals(PlaybackState.REPEAT_MODE_ALL, repeatAllState.repeatMode)
     }
 
-    @Test
-    fun testPlaybackSpeedInPlaybackState() {
-        val defaultState = PlaybackState()
-        assertEquals(1.0f, defaultState.playbackSpeed, 0.001f)
-
-        val updatedState = defaultState.copy(playbackSpeed = 1.5f)
-        assertEquals(1.5f, updatedState.playbackSpeed, 0.001f)
-
-        val slowState = defaultState.copy(playbackSpeed = 0.75f)
-        assertEquals(0.75f, slowState.playbackSpeed, 0.001f)
-    }
 
     @Test
     fun testFromJamendoFactory() {
@@ -228,5 +217,75 @@ class AudioModelTest {
         assertEquals("Offline Artist", entity.artist)
         assertEquals("/data/cache/123.mp3", entity.localFilePath)
         assertEquals(1711500000000L, entity.cachedAtTimestamp)
+    }
+
+    @Test
+    fun testAudioEffectsStateAndPresets() {
+        val defaultState = com.musicplayer.android.core.audio.AudioEffectsState()
+        assertFalse(defaultState.isEnabled)
+        assertEquals(com.musicplayer.android.core.audio.AudioEffectsState.PRESET_FLAT, defaultState.currentPreset)
+        assertEquals(0.toShort(), defaultState.bassBoostStrength)
+        assertTrue(com.musicplayer.android.core.audio.AudioEffectsState.AVAILABLE_PRESETS.contains("Підсилений бас"))
+        assertTrue(com.musicplayer.android.core.audio.AudioEffectsState.AVAILABLE_PRESETS.contains("Рок"))
+
+        val enabledState = defaultState.copy(
+            isEnabled = true,
+            currentPreset = com.musicplayer.android.core.audio.AudioEffectsState.PRESET_ROCK,
+            bassBoostStrength = 400.toShort()
+        )
+        assertTrue(enabledState.isEnabled)
+        assertEquals(com.musicplayer.android.core.audio.AudioEffectsState.PRESET_ROCK, enabledState.currentPreset)
+        assertEquals(400.toShort(), enabledState.bassBoostStrength)
+    }
+
+    @Test
+    fun testFavoriteTrackEntityCreation() {
+        val fav = com.musicplayer.android.core.database.FavoriteTrackEntity(
+            id = "fav_456",
+            title = "Favorite Song",
+            artist = "Great Artist",
+            audioUrl = "https://example.com/fav.mp3",
+            artworkUrl = "https://example.com/art.png",
+            durationMs = 215000L,
+            favoritedAtTimestamp = 1711600000000L
+        )
+        assertEquals("fav_456", fav.id)
+        assertEquals("Favorite Song", fav.title)
+        assertEquals("Great Artist", fav.artist)
+        assertEquals("https://example.com/fav.mp3", fav.audioUrl)
+        assertEquals(215000L, fav.durationMs)
+        assertEquals(1711600000000L, fav.favoritedAtTimestamp)
+    }
+
+    @Test
+    fun testPlayHistoryEntityCreation() {
+        val history = com.musicplayer.android.core.database.PlayHistoryEntity(
+            historyId = 1L,
+            trackId = "hist_789",
+            title = "History Song",
+            artist = "History Artist",
+            audioUrl = "https://example.com/history.mp3",
+            artworkUrl = null,
+            durationMs = 180000L,
+            playedAtTimestamp = 1711700000000L
+        )
+        assertEquals(1L, history.historyId)
+        assertEquals("hist_789", history.trackId)
+        assertEquals("History Song", history.title)
+        assertEquals("History Artist", history.artist)
+        assertEquals(180000L, history.durationMs)
+        assertEquals(1711700000000L, history.playedAtTimestamp)
+    }
+
+    @Test
+    fun testPlaybackStateErrorMessage() {
+        val defaultState = PlaybackState()
+        assertNull(defaultState.errorMessage)
+
+        val errorState = defaultState.copy(errorMessage = "Немає підключення до мережі")
+        assertEquals("Немає підключення до мережі", errorState.errorMessage)
+
+        val recoveredState = errorState.copy(errorMessage = null)
+        assertNull(recoveredState.errorMessage)
     }
 }

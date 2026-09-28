@@ -20,7 +20,6 @@ class SessionManager(context: Context) {
         private const val KEY_BASE_URL = "key_base_url"
         private const val KEY_SHUFFLE_MODE = "key_shuffle_mode"
         private const val KEY_REPEAT_MODE = "key_repeat_mode"
-        private const val KEY_PLAYBACK_SPEED = "key_playback_speed"
 
         const val DEFAULT_BASE_URL = "http://10.0.2.2:5116/"
     }
@@ -95,13 +94,5 @@ class SessionManager(context: Context) {
 
     fun saveRepeatMode(repeatMode: Int) {
         prefs.edit().putInt(KEY_REPEAT_MODE, repeatMode).apply()
-    }
-
-    fun getPlaybackSpeed(): Float {
-        return prefs.getFloat(KEY_PLAYBACK_SPEED, 1.0f)
-    }
-
-    fun savePlaybackSpeed(speed: Float) {
-        prefs.edit().putFloat(KEY_PLAYBACK_SPEED, speed).apply()
     }
 }

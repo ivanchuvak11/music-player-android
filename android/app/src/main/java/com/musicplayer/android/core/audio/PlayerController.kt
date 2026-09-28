@@ -19,6 +19,5 @@ interface PlayerController {
     fun toggleShuffle()
     fun setRepeatMode(repeatMode: Int)
     fun cycleRepeatMode()
-    fun setPlaybackSpeed(speed: Float)
     fun release()
 }

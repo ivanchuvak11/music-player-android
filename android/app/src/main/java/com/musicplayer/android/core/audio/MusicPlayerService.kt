@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -12,7 +13,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 
 /**
- * Background MediaSessionService managing ExoPlayer lifecycle, caching, audio focus, and system audio session.
+ * Background MediaSessionService managing ExoPlayer lifecycle, caching, audio focus, WakeLock, and system audio session.
  */
 class MusicPlayerService : MediaSessionService() {
 
@@ -46,7 +47,18 @@ class MusicPlayerService : MediaSessionService() {
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, /* handleAudioFocus= */ true)
             .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+
+        player.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                AudioEffectsManager.init(audioSessionId)
+            }
+        })
+
+        if (player.audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+            AudioEffectsManager.init(player.audioSessionId)
+        }
 
         mediaSession = MediaSession.Builder(this, player).build()
     }
@@ -56,6 +68,7 @@ class MusicPlayerService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        AudioEffectsManager.release()
         mediaSession?.run {
             player.release()
             release()

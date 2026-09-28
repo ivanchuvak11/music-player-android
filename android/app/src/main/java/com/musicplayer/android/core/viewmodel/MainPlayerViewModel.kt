@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.musicplayer.android.core.audio.AudioCacheManager
+import com.musicplayer.android.core.audio.AudioEffectsManager
+import com.musicplayer.android.core.audio.AudioEffectsState
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.LocalAudioScanner
 import com.musicplayer.android.core.audio.PlaybackState
@@ -11,6 +13,8 @@ import com.musicplayer.android.core.audio.PlayerController
 import com.musicplayer.android.core.audio.PlayerControllerImpl
 import com.musicplayer.android.core.database.AppDatabase
 import com.musicplayer.android.core.database.CachedTrackEntity
+import com.musicplayer.android.core.database.FavoriteTrackEntity
+import com.musicplayer.android.core.database.PlayHistoryEntity
 import com.musicplayer.android.core.network.AddFavoriteRadioRequestDto
 import com.musicplayer.android.core.network.AddFavoriteTrackRequestDto
 import com.musicplayer.android.core.network.AddTrackToPlaylistRequestDto
@@ -124,6 +128,18 @@ class MainPlayerViewModel(
         _cachedSearchQuery.value = query
     }
 
+    // Audio Effects & Hardware Equalizer
+    val audioEffectsState: StateFlow<AudioEffectsState> = AudioEffectsManager.effectsState
+
+    // Local Favorites & Play History from Room DB
+    val localFavorites: StateFlow<List<FavoriteTrackEntity>> = db.favoriteTrackDao()
+        .getAllFavorites()
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val playHistory: StateFlow<List<PlayHistoryEntity>> = db.playHistoryDao()
+        .getRecentHistory(50)
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
     // Auth & User Management
     private val _currentUser = MutableStateFlow<String?>(null)
     val currentUser: StateFlow<String?> = _currentUser.asStateFlow()
@@ -143,15 +159,11 @@ class MainPlayerViewModel(
         // Restore saved player preferences
         val savedShuffle = sessionManager.getShuffleMode()
         val savedRepeat = sessionManager.getRepeatMode()
-        val savedSpeed = sessionManager.getPlaybackSpeed()
         if (savedShuffle) {
             playerController.setShuffleMode(savedShuffle)
         }
         if (savedRepeat != PlaybackState.REPEAT_MODE_OFF) {
             playerController.setRepeatMode(savedRepeat)
-        }
-        if (savedSpeed != 1.0f) {
-            playerController.setPlaybackSpeed(savedSpeed)
         }
 
         // Restore saved session on launch
@@ -162,6 +174,31 @@ class MainPlayerViewModel(
             _authStatusMessage.value = "Авторизовано: ${_currentUser.value}"
             validateSession()
             loadBackendData()
+        }
+
+        // Automatic Play History Recording
+        var lastRecordedTrackId: String? = null
+        viewModelScope.launch {
+            playerController.playbackState.collect { state ->
+                val track = state.currentTrack
+                if (track != null && state.isPlaying && track.id != lastRecordedTrackId) {
+                    lastRecordedTrackId = track.id
+                    try {
+                        db.playHistoryDao().insertHistory(
+                            PlayHistoryEntity(
+                                trackId = track.id,
+                                title = track.title,
+                                artist = track.artist,
+                                audioUrl = track.audioUrl,
+                                artworkUrl = track.artworkUrl,
+                                durationMs = track.durationMs
+                            )
+                        )
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
         }
     }
 
@@ -228,11 +265,6 @@ class MainPlayerViewModel(
         setRepeatMode(nextMode)
     }
 
-    fun setPlaybackSpeed(speed: Float) {
-        playerController.setPlaybackSpeed(speed)
-        sessionManager.savePlaybackSpeed(speed)
-    }
-
     // Audio Cache Management
     fun getAudioCacheSizeBytes(): Long {
         return AudioCacheManager.getCacheSizeBytes(getApplication())
@@ -259,6 +291,16 @@ class MainPlayerViewModel(
         playerController.playTrack(track)
     }
 
+    fun playLocalTrack(track: AudioTrack) {
+        val tracks = _localTracks.value
+        if (tracks.isNotEmpty()) {
+            val index = tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+            playQueue(tracks, index)
+        } else {
+            playTrack(track)
+        }
+    }
+
     fun playQueue(tracks: List<AudioTrack>, startIndex: Int = 0) {
         playerController.setQueue(tracks, startIndex, autoPlay = true)
     }
@@ -268,7 +310,14 @@ class MainPlayerViewModel(
     }
 
     fun playJamendoTrack(track: JamendoTrackDto) {
-        playTrack(AudioTrack.fromJamendo(track))
+        val allJamendo = _searchedJamendoTracks.value
+        if (allJamendo.isNotEmpty()) {
+            val audioTracks = allJamendo.map { AudioTrack.fromJamendo(it) }
+            val index = allJamendo.indexOfFirst { it.externalId == track.externalId }.coerceAtLeast(0)
+            playQueue(audioTracks, index)
+        } else {
+            playTrack(AudioTrack.fromJamendo(track))
+        }
     }
 
     fun playJamendoQueue(tracks: List<JamendoTrackDto>, startIndex: Int = 0) {
@@ -277,7 +326,62 @@ class MainPlayerViewModel(
     }
 
     fun playAudiusTrack(track: AudiusTrackDto, baseUrl: String = sessionManager.getBaseUrl()) {
-        playTrack(AudioTrack.fromAudius(track, baseUrl))
+        val allAudius = if (_trendingAudiusTracks.value.any { it.externalId == track.externalId }) {
+            _trendingAudiusTracks.value
+        } else {
+            _searchedAudiusTracks.value
+        }
+        if (allAudius.isNotEmpty()) {
+            val audioTracks = allAudius.map { AudioTrack.fromAudius(it, baseUrl) }
+            val index = allAudius.indexOfFirst { it.externalId == track.externalId }.coerceAtLeast(0)
+            playQueue(audioTracks, index)
+        } else {
+            playTrack(AudioTrack.fromAudius(track, baseUrl))
+        }
+    }
+
+    // Audio Effects & Equalizer Controls
+    fun setEqualizerEnabled(enabled: Boolean) {
+        AudioEffectsManager.setEnabled(enabled)
+    }
+
+    fun setEqualizerPreset(presetName: String) {
+        AudioEffectsManager.setPreset(presetName)
+    }
+
+    fun setBassBoostStrength(strength: Short) {
+        AudioEffectsManager.setBassBoost(strength)
+    }
+
+    fun setEqualizerBandLevel(band: Short, level: Short) {
+        AudioEffectsManager.setBandLevel(band, level)
+    }
+
+    // Local Favorites & History Management
+    fun toggleLocalFavorite(track: AudioTrack) {
+        viewModelScope.launch {
+            val isFav = localFavorites.value.any { it.id == track.id }
+            if (isFav) {
+                db.favoriteTrackDao().deleteFavorite(track.id)
+            } else {
+                db.favoriteTrackDao().insertFavorite(
+                    FavoriteTrackEntity(
+                        id = track.id,
+                        title = track.title,
+                        artist = track.artist,
+                        audioUrl = track.audioUrl,
+                        artworkUrl = track.artworkUrl,
+                        durationMs = track.durationMs
+                    )
+                )
+            }
+        }
+    }
+
+    fun clearPlayHistory() {
+        viewModelScope.launch {
+            db.playHistoryDao().clearAllHistory()
+        }
     }
 
     // Data Loading & API Calls
