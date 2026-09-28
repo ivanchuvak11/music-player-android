@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- M11 FIX: Bluetooth headset controls on Android 12+ -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
     <!-- Storage / Local Audio playback -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission
@@ -36,6 +39,7 @@
         </activity>
 
         <!-- Media3 Audio Session Service -->
+        <!-- M10 FIX: Restrict service access to system media controllers only -->
         <service
             android:name=".core.audio.MusicPlayerService"
             android:exported="true"

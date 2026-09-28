@@ -6,7 +6,7 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "play_history",
-    indices = [Index(value = ["playedAtTimestamp"])]
+    indices = [Index(value = ["playedAtTimestamp"]), Index(value = ["trackId"])]
 )
 data class PlayHistoryEntity(
     @PrimaryKey(autoGenerate = true) val historyId: Long = 0L,
@@ -16,5 +16,6 @@ data class PlayHistoryEntity(
     val audioUrl: String,
     val artworkUrl: String?,
     val durationMs: Long,
+    val lastPositionMs: Long = 0L,
     val playedAtTimestamp: Long = System.currentTimeMillis()
 )

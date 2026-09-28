@@ -102,7 +102,21 @@ fun PlayerCoreScreen() {
     }
 
     LaunchedEffect(Unit) {
-        viewModel.loadLocalTracks()
+        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        val isGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            perm
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (isGranted) {
+            viewModel.loadLocalTracks()
+        } else {
+            permissionLauncher.launch(perm)
+        }
     }
 
     LaunchedEffect(playbackState.errorMessage) {
@@ -680,7 +694,7 @@ fun PlayerCoreScreen() {
             }
         }
 
-        // Section: Local Tracks Scanner (with voice note filter)
+        // Section: Local Tracks Header
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -688,30 +702,15 @@ fun PlayerCoreScreen() {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "📱 Локальні пісні з пам'яті (фільтр голосових увімкнено):",
+                        text = "📱 Музика з пам'яті телефону (автосканування увімкнено):",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                     Text(
-                        text = "Голосові з Telegram, WhatsApp, диктофона та звуки <20с автоматично відфільтровано",
+                        text = "Нові завантажені треки додаються автоматично. Голосові з месенджерів та звуки <20с відфільтровано.",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            viewModel.loadLocalTracks()
-                            val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                                Manifest.permission.READ_MEDIA_AUDIO
-                            } else {
-                                Manifest.permission.READ_EXTERNAL_STORAGE
-                            }
-                            permissionLauncher.launch(perm)
-                        }
-                    ) {
-                        Text("🔍 Сканувати музику на телефоні")
-                    }
                 }
             }
         }

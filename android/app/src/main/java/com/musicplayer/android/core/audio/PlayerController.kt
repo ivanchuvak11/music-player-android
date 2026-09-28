@@ -19,5 +19,13 @@ interface PlayerController {
     fun toggleShuffle()
     fun setRepeatMode(repeatMode: Int)
     fun cycleRepeatMode()
+
+    // M4 FIX: Playback speed control
+    fun setPlaybackSpeed(speed: Float)
+
+    // M12 FIX: Granular queue management
+    fun addToQueue(track: AudioTrack)
+    fun removeFromQueue(index: Int)
+
     fun release()
 }

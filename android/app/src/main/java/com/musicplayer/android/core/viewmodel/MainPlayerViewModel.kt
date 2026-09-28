@@ -176,26 +176,48 @@ class MainPlayerViewModel(
             loadBackendData()
         }
 
-        // Automatic Play History Recording
+        // Restore persisted Equalizer & Bass Boost preferences
+        AudioEffectsManager.restorePersistedState(application)
+
+        // Automatic Local Audio Scanning on App Launch & when media is downloaded
+        loadLocalTracks()
+        viewModelScope.launch {
+            try {
+                localScanner.observeMediaChanges().collect {
+                    loadLocalTracks()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // Automatic Play History Recording & Position Bookmarking
         var lastRecordedTrackId: String? = null
         viewModelScope.launch {
             playerController.playbackState.collect { state ->
                 val track = state.currentTrack
-                if (track != null && state.isPlaying && track.id != lastRecordedTrackId) {
-                    lastRecordedTrackId = track.id
-                    try {
-                        db.playHistoryDao().insertHistory(
-                            PlayHistoryEntity(
-                                trackId = track.id,
-                                title = track.title,
-                                artist = track.artist,
-                                audioUrl = track.audioUrl,
-                                artworkUrl = track.artworkUrl,
-                                durationMs = track.durationMs
+                if (track != null) {
+                    if (state.currentPositionMs > 1000L) {
+                        sessionManager.saveLastPlaybackPosition(track.id, state.currentPositionMs)
+                    }
+                    if (state.isPlaying && track.id != lastRecordedTrackId) {
+                        lastRecordedTrackId = track.id
+                        try {
+                            db.playHistoryDao().insertHistory(
+                                PlayHistoryEntity(
+                                    trackId = track.id,
+                                    title = track.title,
+                                    artist = track.artist,
+                                    audioUrl = track.audioUrl,
+                                    artworkUrl = track.artworkUrl,
+                                    durationMs = track.durationMs,
+                                    lastPositionMs = state.currentPositionMs
+                                )
                             )
-                        )
-                    } catch (e: Exception) {
-                        e.printStackTrace()
+                            db.playHistoryDao().trimOldHistory()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
                     }
                 }
             }
@@ -342,19 +364,50 @@ class MainPlayerViewModel(
 
     // Audio Effects & Equalizer Controls
     fun setEqualizerEnabled(enabled: Boolean) {
-        AudioEffectsManager.setEnabled(enabled)
+        AudioEffectsManager.setEnabled(enabled, getApplication())
     }
 
     fun setEqualizerPreset(presetName: String) {
-        AudioEffectsManager.setPreset(presetName)
+        AudioEffectsManager.setPreset(presetName, getApplication())
     }
 
     fun setBassBoostStrength(strength: Short) {
-        AudioEffectsManager.setBassBoost(strength)
+        AudioEffectsManager.setBassBoost(strength, getApplication())
     }
 
     fun setEqualizerBandLevel(band: Short, level: Short) {
-        AudioEffectsManager.setBandLevel(band, level)
+        AudioEffectsManager.setBandLevel(band, level, getApplication())
+    }
+
+    fun setLoudnessEnhancerGain(gainMb: Int) {
+        AudioEffectsManager.setLoudnessEnhancerGain(gainMb)
+    }
+
+    // Playback Speed & Queue Management
+    fun setPlaybackSpeed(speed: Float) {
+        playerController.setPlaybackSpeed(speed)
+    }
+
+    fun addToQueue(track: AudioTrack) {
+        playerController.addToQueue(track)
+    }
+
+    fun removeFromQueue(index: Int) {
+        playerController.removeFromQueue(index)
+    }
+
+    // Sleep Timer Controls
+    val sleepTimerRemainingSeconds: StateFlow<Long> = com.musicplayer.android.core.audio.SleepTimer.remainingSeconds
+    val isSleepTimerActive: StateFlow<Boolean> = com.musicplayer.android.core.audio.SleepTimer.isActive
+
+    fun startSleepTimer(minutes: Int) {
+        com.musicplayer.android.core.audio.SleepTimer.start(minutes) {
+            pause()
+        }
+    }
+
+    fun cancelSleepTimer() {
+        com.musicplayer.android.core.audio.SleepTimer.cancel()
     }
 
     // Local Favorites & History Management
