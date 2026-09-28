@@ -36,7 +36,6 @@ class PlayerControllerImpl(
     private var progressJob: Job? = null
     private var pendingShuffleMode: Boolean? = null
     private var pendingRepeatMode: Int? = null
-    private var pendingPlaybackSpeed: Float? = null
 
     init {
         initializeController()
@@ -57,7 +56,6 @@ class PlayerControllerImpl(
                         else -> Player.REPEAT_MODE_OFF
                     }
                 }
-                pendingPlaybackSpeed?.let { mediaController?.setPlaybackSpeed(it) }
                 updateState()
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -89,10 +87,6 @@ class PlayerControllerImpl(
             }
 
             override fun onRepeatModeChanged(repeatMode: Int) {
-                updateState()
-            }
-
-            override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
                 updateState()
             }
         })
@@ -145,17 +139,51 @@ class PlayerControllerImpl(
             hasNext = controller.hasNextMediaItem(),
             hasPrevious = controller.hasPreviousMediaItem(),
             shuffleModeEnabled = controller.shuffleModeEnabled,
-            repeatMode = mappedRepeatMode,
-            playbackSpeed = controller.playbackParameters.speed
+            repeatMode = mappedRepeatMode
         )
     }
 
+    private var fadeJob: Job? = null
+
     override fun play() {
-        mediaController?.play()
+        val controller = mediaController ?: return
+        fadeJob?.cancel()
+        fadeJob = scope.launch {
+            try {
+                controller.volume = 0.2f
+                controller.play()
+                val steps = 4
+                val stepDelay = 35L
+                for (i in 1..steps) {
+                    delay(stepDelay)
+                    controller.volume = 0.2f + (0.8f * i / steps)
+                }
+                controller.volume = 1.0f
+            } catch (e: Exception) {
+                controller.volume = 1.0f
+                controller.play()
+            }
+        }
     }
 
     override fun pause() {
-        mediaController?.pause()
+        val controller = mediaController ?: return
+        fadeJob?.cancel()
+        fadeJob = scope.launch {
+            try {
+                val steps = 5
+                val stepDelay = 35L
+                for (i in (steps - 1) downTo 0) {
+                    controller.volume = i.toFloat() / steps
+                    delay(stepDelay)
+                }
+                controller.pause()
+                controller.volume = 1.0f
+            } catch (e: Exception) {
+                controller.pause()
+                controller.volume = 1.0f
+            }
+        }
     }
 
     override fun playNext() {
@@ -185,7 +213,14 @@ class PlayerControllerImpl(
     }
 
     override fun playTrack(track: AudioTrack) {
-        setQueue(listOf(track), startIndex = 0, autoPlay = true)
+        val existingIndex = currentQueue.indexOfFirst { it.id == track.id }
+        if (existingIndex >= 0) {
+            mediaController?.seekToDefaultPosition(existingIndex)
+            play()
+            updateState()
+        } else {
+            setQueue(listOf(track), startIndex = 0, autoPlay = true)
+        }
     }
 
     override fun setShuffleMode(enabled: Boolean) {
@@ -227,18 +262,8 @@ class PlayerControllerImpl(
         setRepeatMode(nextMode)
     }
 
-    override fun setPlaybackSpeed(speed: Float) {
-        val controller = mediaController
-        if (controller != null) {
-            controller.setPlaybackSpeed(speed)
-            updateState()
-        } else {
-            pendingPlaybackSpeed = speed
-            _playbackState.value = _playbackState.value.copy(playbackSpeed = speed)
-        }
-    }
-
     override fun release() {
+        fadeJob?.cancel()
         stopProgressTracker()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         mediaController = null

@@ -5,9 +5,19 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [CachedTrackEntity::class], version = 2, exportSchema = false)
+@Database(
+    entities = [
+        CachedTrackEntity::class,
+        FavoriteTrackEntity::class,
+        PlayHistoryEntity::class
+    ],
+    version = 3,
+    exportSchema = false
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun cachedTrackDao(): CachedTrackDao
+    abstract fun favoriteTrackDao(): FavoriteTrackDao
+    abstract fun playHistoryDao(): PlayHistoryDao
 
     companion object {
         @Volatile
