@@ -179,6 +179,18 @@ class MainPlayerViewModel(
         // Restore persisted Equalizer & Bass Boost preferences
         AudioEffectsManager.restorePersistedState(application)
 
+        // Automatic Local Audio Scanning on App Launch & when media is downloaded
+        loadLocalTracks()
+        viewModelScope.launch {
+            try {
+                localScanner.observeMediaChanges().collect {
+                    loadLocalTracks()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
         // Automatic Play History Recording & Position Bookmarking
         var lastRecordedTrackId: String? = null
         viewModelScope.launch {

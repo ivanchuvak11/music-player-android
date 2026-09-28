@@ -2,16 +2,51 @@ package com.musicplayer.android.core.audio
 
 import android.content.ContentUris
 import android.content.Context
+import android.database.ContentObserver
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 
 /**
  * Scans on-device audio files using Android MediaStore with robust error-handling
  * for permission revocations, OEM cursor idiosyncrasies, and audio clips filtering.
+ * Also provides a real-time ContentObserver to automatically detect newly downloaded audio files.
  */
 class LocalAudioScanner(private val context: Context) {
+
+    /**
+     * Observes Android MediaStore for file system changes (e.g. newly downloaded songs).
+     * Emits whenever audio files are added, modified, or deleted on the device.
+     */
+    fun observeMediaChanges(): Flow<Unit> = callbackFlow {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                trySend(Unit)
+            }
+        }
+        try {
+            context.contentResolver.registerContentObserver(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                true,
+                observer
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        awaitClose {
+            try {
+                context.contentResolver.unregisterContentObserver(observer)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     suspend fun getLocalAudioTracks(minDurationMs: Long = 20_000L): List<AudioTrack> = withContext(Dispatchers.IO) {
         val tracks = mutableListOf<AudioTrack>()
@@ -24,8 +59,8 @@ class LocalAudioScanner(private val context: Context) {
             MediaStore.Audio.Media.DATA
         )
 
-        // Filter out short audio clips (<20s) such as voice messages, ringtones, and notification sounds
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= ?"
+        // Broader selection to catch downloaded tracks that might not have IS_MUSIC set immediately
+        val selection = "(${MediaStore.Audio.Media.IS_MUSIC} != 0 OR ${MediaStore.Audio.Media.MIME_TYPE} LIKE 'audio/%') AND ${MediaStore.Audio.Media.DURATION} >= ?"
         val selectionArgs = arrayOf(minDurationMs.toString())
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
@@ -60,6 +95,21 @@ class LocalAudioScanner(private val context: Context) {
                         filePath.contains("alarms")
 
                     if (isMessengerOrVoiceNote) {
+                        continue
+                    }
+
+                    // Check valid audio extensions
+                    val isAudioExtension = filePath.endsWith(".mp3") ||
+                        filePath.endsWith(".m4a") ||
+                        filePath.endsWith(".aac") ||
+                        filePath.endsWith(".flac") ||
+                        filePath.endsWith(".wav") ||
+                        filePath.endsWith(".ogg") ||
+                        filePath.endsWith(".opus") ||
+                        filePath.endsWith(".wma") ||
+                        filePath.isBlank() // If dataColumn isn't provided by Android 11+ scoped storage, pass through
+
+                    if (!isAudioExtension) {
                         continue
                     }
 
