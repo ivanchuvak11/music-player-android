@@ -58,7 +58,7 @@ class MusicPlayerService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
 
-        // H2 FIX: Initialize AudioEffects on background thread to avoid ANR
+        // Initialize AudioEffects on background thread to avoid ANR without accessing player off main thread
         player.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
                 CoroutineScope(Dispatchers.IO).launch {
@@ -67,9 +67,10 @@ class MusicPlayerService : MediaSessionService() {
             }
         })
 
-        if (player.audioSessionId != C.AUDIO_SESSION_ID_UNSET) {
+        val initialSessionId = player.audioSessionId
+        if (initialSessionId != C.AUDIO_SESSION_ID_UNSET) {
             CoroutineScope(Dispatchers.IO).launch {
-                AudioEffectsManager.init(player.audioSessionId)
+                AudioEffectsManager.init(initialSessionId)
             }
         }
 
