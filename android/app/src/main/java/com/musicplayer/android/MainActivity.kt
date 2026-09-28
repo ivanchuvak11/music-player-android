@@ -105,6 +105,25 @@ fun PlayerCoreScreen() {
         viewModel.loadLocalTracks()
     }
 
+    LaunchedEffect(playbackState.errorMessage) {
+        val error = playbackState.errorMessage
+        if (!error.isNullOrBlank()) {
+            Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val playOnlineSafely: (() -> Unit) -> Unit = { action ->
+        if (isOnline) {
+            action()
+        } else {
+            Toast.makeText(
+                context,
+                "📡 Немає зв'язку з інтернетом. Ви можете слухати музику з пристрою чи збережений Room-кеш офлайн!",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -135,6 +154,51 @@ fun PlayerCoreScreen() {
                     onClick = {},
                     label = { Text(if (isOnline) "🟢 Онлайн" else "🔴 Офлайн", fontSize = 11.sp) }
                 )
+            }
+        }
+
+        // Status Banner: Network Error or Offline Mode
+        if (playbackState.errorMessage != null) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("⚠️", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = playbackState.errorMessage ?: "",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+        } else if (!isOnline) {
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📡", fontSize = 18.sp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Ви зараз офлайн. Треки з пам'яті телефону та кеш Room доступні без інтернету!",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
 
@@ -241,13 +305,20 @@ fun PlayerCoreScreen() {
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    // Interactive Seek Slider
+                    // Interactive Seek Slider with smooth preview to avoid audio stuttering
+                    var userSeekingPosition by remember { mutableStateOf<Float?>(null) }
+                    val currentPos = userSeekingPosition ?: playbackState.currentPositionMs.toFloat()
+
                     if (playbackState.durationMs > 0L) {
                         Slider(
-                            value = playbackState.currentPositionMs.toFloat().coerceIn(0f, playbackState.durationMs.toFloat()),
+                            value = currentPos.coerceIn(0f, playbackState.durationMs.toFloat()),
                             valueRange = 0f..playbackState.durationMs.toFloat(),
                             onValueChange = { newPos ->
-                                viewModel.seekTo(newPos.toLong())
+                                userSeekingPosition = newPos
+                            },
+                            onValueChangeFinished = {
+                                userSeekingPosition?.let { viewModel.seekTo(it.toLong()) }
+                                userSeekingPosition = null
                             },
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -262,6 +333,7 @@ fun PlayerCoreScreen() {
                     ) {
                         Text(
                             text = when {
+                                playbackState.errorMessage != null -> "⚠️ Збій мережі"
                                 playbackState.isBuffering -> "⏳ Буферизація..."
                                 playbackState.isPlaying -> "▶ Відтворення"
                                 playbackState.currentTrack != null -> "⏸ На паузі"
@@ -270,8 +342,9 @@ fun PlayerCoreScreen() {
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
+                        val displayedPos = userSeekingPosition?.toLong() ?: playbackState.currentPositionMs
                         Text(
-                            text = "${formatDuration(playbackState.currentPositionMs)} / ${formatDuration(playbackState.durationMs)}",
+                            text = "${formatDuration(displayedPos)} / ${formatDuration(playbackState.durationMs)}",
                             fontSize = 12.sp
                         )
                     }
@@ -402,13 +475,50 @@ fun PlayerCoreScreen() {
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))
-                            Text("Підсилення басу (Bass Boost): ${audioEffectsState.bassBoostStrength / 10}%", fontSize = 12.sp)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Підсилення басу (Bass Boost):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("${audioEffectsState.bassBoostStrength / 10}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                            }
                             Slider(
                                 value = audioEffectsState.bassBoostStrength.toFloat(),
                                 onValueChange = { viewModel.setBassBoostStrength(it.toInt().toShort()) },
                                 valueRange = 0f..1000f,
                                 modifier = Modifier.fillMaxWidth()
                             )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("Смуги частот (5-смуговий Еквалайзер):", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            for (i in 0 until audioEffectsState.numberOfBands) {
+                                val band = i.toShort()
+                                val level = audioEffectsState.bandLevels[band] ?: 0.toShort()
+                                val label = AudioEffectsState.BAND_LABELS[band] ?: "Смуга ${i + 1}"
+                                val dbValue = level.toFloat() / 100f
+                                val dbText = if (dbValue >= 0f) "+${"%.1f".format(dbValue)} dB" else "${"%.1f".format(dbValue)} dB"
+
+                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(label, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
+                                        Text(dbText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                    Slider(
+                                        value = level.toFloat().coerceIn(audioEffectsState.minBandLevel.toFloat(), audioEffectsState.maxBandLevel.toFloat()),
+                                        onValueChange = { newLevel ->
+                                            viewModel.setEqualizerBandLevel(band, newLevel.toInt().toShort())
+                                        },
+                                        valueRange = audioEffectsState.minBandLevel.toFloat()..audioEffectsState.maxBandLevel.toFloat(),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -816,7 +926,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playAudiusTrack(audiusTrack) },
+                        .clickable { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -827,7 +937,7 @@ fun PlayerCoreScreen() {
                             Text(text = audiusTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
                             Text(text = audiusTrack.artist, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Button(onClick = { viewModel.playAudiusTrack(audiusTrack) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } }) {
                             Text("▶")
                         }
                     }
@@ -886,7 +996,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playJamendoTrack(jamendoTrack) },
+                        .clickable { playOnlineSafely { viewModel.playJamendoTrack(jamendoTrack) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -901,7 +1011,7 @@ fun PlayerCoreScreen() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Button(onClick = { viewModel.playJamendoTrack(jamendoTrack) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playJamendoTrack(jamendoTrack) } }) {
                             Text("▶")
                         }
                     }
@@ -946,7 +1056,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playRadioStation(station) },
+                        .clickable { playOnlineSafely { viewModel.playRadioStation(station) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -961,7 +1071,7 @@ fun PlayerCoreScreen() {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Button(onClick = { viewModel.playRadioStation(station) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playRadioStation(station) } }) {
                             Text("▶")
                         }
                     }
@@ -1063,7 +1173,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playAudiusTrack(audiusTrack) },
+                        .clickable { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -1074,7 +1184,7 @@ fun PlayerCoreScreen() {
                             Text(text = audiusTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
                             Text(text = audiusTrack.artist, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Button(onClick = { viewModel.playAudiusTrack(audiusTrack) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } }) {
                             Text("▶")
                         }
                     }
@@ -1095,7 +1205,7 @@ fun PlayerCoreScreen() {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { viewModel.playRadioStation(station) },
+                        .clickable { playOnlineSafely { viewModel.playRadioStation(station) } },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Row(
@@ -1106,7 +1216,7 @@ fun PlayerCoreScreen() {
                             Text(text = station.name, fontWeight = FontWeight.Medium, maxLines = 1)
                             Text(text = station.genre ?: "Online Radio", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Button(onClick = { viewModel.playRadioStation(station) }) {
+                        Button(onClick = { playOnlineSafely { viewModel.playRadioStation(station) } }) {
                             Text("📻")
                         }
                     }

@@ -3,6 +3,7 @@ package com.musicplayer.android.core.audio
 import android.content.ComponentName
 import android.content.Context
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -34,6 +35,7 @@ class PlayerControllerImpl(
 
     private var currentQueue: List<AudioTrack> = emptyList()
     private var progressJob: Job? = null
+    private var fadeJob: Job? = null
     private var pendingShuffleMode: Boolean? = null
     private var pendingRepeatMode: Int? = null
 
@@ -79,6 +81,7 @@ class PlayerControllerImpl(
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                _playbackState.value = _playbackState.value.copy(errorMessage = null)
                 updateState()
             }
 
@@ -88,6 +91,41 @@ class PlayerControllerImpl(
 
             override fun onRepeatModeChanged(repeatMode: Int) {
                 updateState()
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                val isNetworkError = error.errorCode in listOf(
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+                    PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+                    PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND
+                ) || error.message?.contains("Unable to connect", ignoreCase = true) == true
+                   || error.message?.contains("timeout", ignoreCase = true) == true
+
+                val message = if (isNetworkError) {
+                    "Немає підключення до мережі або сервер недоступний. Ви можете слухати збережені пісні та музику з пам'яті пристрою офлайн."
+                } else {
+                    "Помилка відтворення: ${error.localizedMessage ?: "невідомий формат або пошкоджений файл"}"
+                }
+
+                _playbackState.value = _playbackState.value.copy(
+                    errorMessage = message,
+                    isBuffering = false,
+                    isPlaying = false
+                )
+
+                // If next track exists in queue, automatically retry with next item
+                val controller = mediaController
+                if (controller != null && controller.hasNextMediaItem()) {
+                    scope.launch {
+                        delay(2500)
+                        if (_playbackState.value.errorMessage != null && controller.hasNextMediaItem()) {
+                            controller.seekToNextMediaItem()
+                            controller.play()
+                        }
+                    }
+                }
             }
         })
     }
@@ -143,11 +181,10 @@ class PlayerControllerImpl(
         )
     }
 
-    private var fadeJob: Job? = null
-
     override fun play() {
         val controller = mediaController ?: return
         fadeJob?.cancel()
+        _playbackState.value = _playbackState.value.copy(errorMessage = null)
         fadeJob = scope.launch {
             try {
                 controller.volume = 0.2f
@@ -158,10 +195,10 @@ class PlayerControllerImpl(
                     delay(stepDelay)
                     controller.volume = 0.2f + (0.8f * i / steps)
                 }
-                controller.volume = 1.0f
             } catch (e: Exception) {
-                controller.volume = 1.0f
                 controller.play()
+            } finally {
+                controller.volume = 1.0f
             }
         }
     }
@@ -178,19 +215,21 @@ class PlayerControllerImpl(
                     delay(stepDelay)
                 }
                 controller.pause()
-                controller.volume = 1.0f
             } catch (e: Exception) {
                 controller.pause()
+            } finally {
                 controller.volume = 1.0f
             }
         }
     }
 
     override fun playNext() {
+        _playbackState.value = _playbackState.value.copy(errorMessage = null)
         mediaController?.seekToNextMediaItem()
     }
 
     override fun playPrevious() {
+        _playbackState.value = _playbackState.value.copy(errorMessage = null)
         mediaController?.seekToPreviousMediaItem()
     }
 
@@ -201,6 +240,7 @@ class PlayerControllerImpl(
 
     override fun setQueue(tracks: List<AudioTrack>, startIndex: Int, autoPlay: Boolean) {
         currentQueue = tracks
+        _playbackState.value = _playbackState.value.copy(errorMessage = null)
         val mediaItems = tracks.map { it.toMediaItem() }
         mediaController?.apply {
             setMediaItems(mediaItems, startIndex, 0L)
@@ -213,6 +253,7 @@ class PlayerControllerImpl(
     }
 
     override fun playTrack(track: AudioTrack) {
+        _playbackState.value = _playbackState.value.copy(errorMessage = null)
         val existingIndex = currentQueue.indexOfFirst { it.id == track.id }
         if (existingIndex >= 0) {
             mediaController?.seekToDefaultPosition(existingIndex)

@@ -276,4 +276,16 @@ class AudioModelTest {
         assertEquals(180000L, history.durationMs)
         assertEquals(1711700000000L, history.playedAtTimestamp)
     }
+
+    @Test
+    fun testPlaybackStateErrorMessage() {
+        val defaultState = PlaybackState()
+        assertNull(defaultState.errorMessage)
+
+        val errorState = defaultState.copy(errorMessage = "Немає підключення до мережі")
+        assertEquals("Немає підключення до мережі", errorState.errorMessage)
+
+        val recoveredState = errorState.copy(errorMessage = null)
+        assertNull(recoveredState.errorMessage)
+    }
 }
