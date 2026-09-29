@@ -13,6 +13,7 @@ import android.os.Looper
 import com.musicplayer.android.core.session.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -95,6 +96,9 @@ object AudioEffectsManager {
     private var headsetReceiver: android.content.BroadcastReceiver? = null
     // Fix #11: keep context reference so we can unregister the receiver in release()
     private var appContextRef: Context? = null
+    // Fix: Dedicated persistence scope and job to avoid orphaned coroutines
+    private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var persistenceJob: kotlinx.coroutines.Job? = null
 
     private val _effectsState = MutableStateFlow(AudioEffectsState())
     val effectsState: StateFlow<AudioEffectsState> = _effectsState.asStateFlow()
@@ -209,9 +213,7 @@ object AudioEffectsManager {
     @Synchronized
     fun init(audioSessionId: Int) {
         if (audioSessionId == 0 || audioSessionId == currentSessionId) return
-        // Fix #20: release() resets currentSessionId; if it throws, still continue with new session
         release()
-        currentSessionId = audioSessionId
 
         try {
             val canEnable = _effectsState.value.isEnabled && _effectsState.value.isHeadphonesConnected
@@ -255,6 +257,9 @@ object AudioEffectsManager {
                 e.printStackTrace()
             }
 
+            // Only mark session as active once hardware effects are successfully attached
+            currentSessionId = audioSessionId
+
             _effectsState.value = _effectsState.value.copy(
                 numberOfBands = numBands,
                 bandLevels = bandsMap,
@@ -263,6 +268,8 @@ object AudioEffectsManager {
             )
         } catch (e: Throwable) {
             e.printStackTrace()
+            // Clean up partially initialized effects and reset currentSessionId to 0 for clean retry
+            release()
         }
     }
 
@@ -478,9 +485,11 @@ object AudioEffectsManager {
 
     private fun persistState(context: Context) {
         val state = _effectsState.value
-        CoroutineScope(Dispatchers.IO).launch {
+        val appContext = context.applicationContext
+        persistenceJob?.cancel()
+        persistenceJob = persistenceScope.launch {
             try {
-                SessionManager.getInstance(context).saveEqualizerState(
+                SessionManager.getInstance(appContext).saveEqualizerState(
                     enabled = state.isEnabled,
                     preset = state.currentPreset,
                     bassBoost = state.bassBoostStrength,

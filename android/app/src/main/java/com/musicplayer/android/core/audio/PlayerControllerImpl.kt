@@ -47,8 +47,11 @@ class PlayerControllerImpl(
     private var currentQueue: List<AudioTrack> = emptyList()
     private var progressJob: Job? = null
     private var fadeJob: Job? = null
+    private var retryJob: Job? = null
     private var pendingShuffleMode: Boolean? = null
     private var pendingRepeatMode: Int? = null
+    private var pendingPlaybackSpeed: Float? = null
+    private var pendingSeekPositionMs: Long? = null
 
     // Fix #3: pending queue/play stored when controller not yet connected
     private data class PendingQueue(val tracks: List<AudioTrack>, val startIndex: Int, val autoPlay: Boolean)
@@ -91,8 +94,10 @@ class PlayerControllerImpl(
                         else -> Player.REPEAT_MODE_OFF
                     }
                 }
+                pendingPlaybackSpeed?.let { controller.setPlaybackSpeed(it) }
                 pendingShuffleMode = null
                 pendingRepeatMode = null
+                pendingPlaybackSpeed = null
 
                 setupPlayerListener()
                 updateState()
@@ -124,8 +129,10 @@ class PlayerControllerImpl(
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                // Fix #6: Reset error counter on any successful track transition
+                // Fix #6: Reset error counter and cancel any pending auto-skip retry on transition
                 consecutiveErrors = 0
+                retryJob?.cancel()
+                retryJob = null
                 _playbackState.value = _playbackState.value.copy(errorMessage = null)
                 updateState()
             }
@@ -169,16 +176,20 @@ class PlayerControllerImpl(
                 if (controller != null && controller.hasNextMediaItem()) {
                     consecutiveErrors++
                     if (consecutiveErrors <= maxConsecutiveErrors) {
-                        scope.launch {
+                        retryJob?.cancel()
+                        retryJob = scope.launch {
                             delay(2500)
-                            if (_playbackState.value.errorMessage != null && controller.hasNextMediaItem()) {
-                                controller.seekToNextMediaItem()
-                                controller.play()
+                            val activeController = mediaController
+                            if (activeController != null && _playbackState.value.errorMessage != null && activeController.hasNextMediaItem()) {
+                                activeController.seekToNextMediaItem()
+                                activeController.play()
                             }
                         }
                     } else {
                         // Exhausted retries — clear error and stop attempting auto-skip
                         consecutiveErrors = 0
+                        retryJob?.cancel()
+                        retryJob = null
                     }
                 }
             }
@@ -240,6 +251,8 @@ class PlayerControllerImpl(
     override fun play() {
         val controller = mediaController ?: return
         fadeJob?.cancel()
+        retryJob?.cancel()
+        retryJob = null
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         fadeJob = scope.launch {
             try {
@@ -283,17 +296,27 @@ class PlayerControllerImpl(
     override fun playNext() {
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         consecutiveErrors = 0
+        retryJob?.cancel()
+        retryJob = null
         mediaController?.seekToNextMediaItem()
     }
 
     override fun playPrevious() {
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         consecutiveErrors = 0
+        retryJob?.cancel()
+        retryJob = null
         mediaController?.seekToPreviousMediaItem()
     }
 
     override fun seekTo(positionMs: Long) {
-        mediaController?.seekTo(positionMs)
+        val controller = mediaController
+        if (controller != null) {
+            controller.seekTo(positionMs)
+            pendingSeekPositionMs = null
+        } else {
+            pendingSeekPositionMs = positionMs
+        }
         _playbackState.value = _playbackState.value.copy(currentPositionMs = positionMs)
     }
 
@@ -307,7 +330,9 @@ class PlayerControllerImpl(
             pendingQueue = PendingQueue(tracks, startIndex, autoPlay)
             return
         }
-        controller.setMediaItems(mediaItems, startIndex, 0L)
+        val startPos = pendingSeekPositionMs ?: 0L
+        pendingSeekPositionMs = null
+        controller.setMediaItems(mediaItems, startIndex, startPos)
         controller.prepare()
         if (autoPlay) {
             controller.play()
@@ -319,7 +344,14 @@ class PlayerControllerImpl(
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         val existingIndex = currentQueue.indexOfFirst { it.id == track.id }
         if (existingIndex >= 0) {
-            mediaController?.seekToDefaultPosition(existingIndex)
+            val controller = mediaController
+            val pos = pendingSeekPositionMs ?: 0L
+            pendingSeekPositionMs = null
+            if (pos > 0L) {
+                controller?.seekTo(existingIndex, pos)
+            } else {
+                controller?.seekToDefaultPosition(existingIndex)
+            }
             play()
             updateState()
         } else {
@@ -368,14 +400,30 @@ class PlayerControllerImpl(
 
     override fun setPlaybackSpeed(speed: Float) {
         val clampedSpeed = speed.coerceIn(0.25f, 3.0f)
-        mediaController?.setPlaybackSpeed(clampedSpeed)
+        val controller = mediaController
+        if (controller != null) {
+            controller.setPlaybackSpeed(clampedSpeed)
+            pendingPlaybackSpeed = null
+        } else {
+            pendingPlaybackSpeed = clampedSpeed
+        }
         _playbackState.value = _playbackState.value.copy(playbackSpeed = clampedSpeed)
     }
 
     override fun addToQueue(track: AudioTrack) {
         currentQueue = currentQueue + track
-        mediaController?.addMediaItem(track.toMediaItem())
-        updateState()
+        val controller = mediaController
+        if (controller != null) {
+            controller.addMediaItem(track.toMediaItem())
+            updateState()
+        } else {
+            val currentPq = pendingQueue
+            pendingQueue = if (currentPq != null) {
+                currentPq.copy(tracks = currentPq.tracks + track)
+            } else {
+                PendingQueue(listOf(track), startIndex = 0, autoPlay = false)
+            }
+        }
     }
 
     override fun removeFromQueue(index: Int) {
@@ -391,9 +439,13 @@ class PlayerControllerImpl(
 
     override fun release() {
         fadeJob?.cancel()
+        retryJob?.cancel()
+        retryJob = null
         stopProgressTracker()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         mediaController = null
         pendingQueue = null
+        pendingSeekPositionMs = null
+        pendingPlaybackSpeed = null
     }
 }

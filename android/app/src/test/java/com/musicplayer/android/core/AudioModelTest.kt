@@ -2,6 +2,8 @@ package com.musicplayer.android.core
 
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.PlaybackState
+import com.musicplayer.android.core.audio.calculateSearchRelevanceScore
+import com.musicplayer.android.core.audio.toAudioTrack
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -374,5 +376,114 @@ class AudioModelTest {
         assertFalse("Equalizer must not enable when headphones are not connected", result)
         assertFalse("State isEnabled must remain false", com.musicplayer.android.core.audio.AudioEffectsManager.effectsState.value.isEnabled)
     }
+
+    @Test
+    fun testEntityToAudioTrackExtensions() {
+        val cached = com.musicplayer.android.core.database.CachedTrackEntity(
+            id = "cache_1",
+            title = "Cached Song",
+            artist = "Cached Artist",
+            localFilePath = "/data/local.mp3",
+            originalUrl = "http://example.com/song.mp3",
+            artworkUrl = "http://example.com/art.png",
+            durationMs = 120000L,
+            cachedAtTimestamp = 1000L
+        )
+        val cachedTrack = cached.toAudioTrack()
+        assertEquals("cache_1", cachedTrack.id)
+        assertEquals("/data/local.mp3", cachedTrack.audioUrl)
+        assertEquals("http://example.com/art.png", cachedTrack.artworkUrl)
+        assertTrue(cachedTrack.isLocal)
+
+        val fav = com.musicplayer.android.core.database.FavoriteTrackEntity(
+            id = "fav_1",
+            title = "Fav Song",
+            artist = "Fav Artist",
+            audioUrl = "http://example.com/fav.mp3",
+            artworkUrl = "http://example.com/fav_art.png",
+            durationMs = 150000L
+        )
+        val favTrack = fav.toAudioTrack()
+        assertEquals("fav_1", favTrack.id)
+        assertEquals("http://example.com/fav_art.png", favTrack.artworkUrl)
+        assertFalse(favTrack.isLocal)
+
+        val hist = com.musicplayer.android.core.database.PlayHistoryEntity(
+            historyId = 5L,
+            trackId = "hist_1",
+            title = "Hist Song",
+            artist = "Hist Artist",
+            audioUrl = "content://media/external/audio/media/99",
+            artworkUrl = null,
+            durationMs = 90000L
+        )
+        val histTrack = hist.toAudioTrack()
+        assertEquals("hist_1", histTrack.id)
+        assertTrue(histTrack.isLocal)
+
+        val plTrack = com.musicplayer.android.core.database.LocalPlaylistTrackEntity(
+            id = 1L,
+            playlistId = 10L,
+            trackId = "pl_track_1",
+            title = "Playlist Track",
+            artist = "Playlist Artist",
+            audioUrl = "content://media/external/audio/media/100",
+            artworkUrl = "http://example.com/pl_art.png",
+            durationMs = 180000L,
+            isLocal = true
+        )
+        val plAudioTrack = plTrack.toAudioTrack()
+        assertEquals("pl_track_1", plAudioTrack.id)
+        assertEquals("http://example.com/pl_art.png", plAudioTrack.artworkUrl)
+        assertTrue(plAudioTrack.isLocal)
+    }
+
+    @Test
+    fun testSearchRelevanceScoring() {
+        val exactTrack = AudioTrack(
+            id = "1",
+            title = "Believer",
+            artist = "Imagine Dragons",
+            audioUrl = "http://example.com/1.mp3"
+        )
+        val prefixTrack = AudioTrack(
+            id = "2",
+            title = "Believer (Acoustic Remix)",
+            artist = "Another Artist",
+            audioUrl = "http://example.com/2.mp3"
+        )
+        val wordBoundaryTrack = AudioTrack(
+            id = "3",
+            title = "I am a Believer",
+            artist = "The Monkees",
+            audioUrl = "http://example.com/3.mp3"
+        )
+        val artistMatchTrack = AudioTrack(
+            id = "4",
+            title = "Radioactive",
+            artist = "Believer Band",
+            audioUrl = "http://example.com/4.mp3"
+        )
+        val irrelevantTrack = AudioTrack(
+            id = "5",
+            title = "Shape of You",
+            artist = "Ed Sheeran",
+            audioUrl = "http://example.com/5.mp3"
+        )
+
+        val query = "Believer"
+        val exactScore = exactTrack.calculateSearchRelevanceScore(query)
+        val prefixScore = prefixTrack.calculateSearchRelevanceScore(query)
+        val boundaryScore = wordBoundaryTrack.calculateSearchRelevanceScore(query)
+        val artistScore = artistMatchTrack.calculateSearchRelevanceScore(query)
+        val irrelevantScore = irrelevantTrack.calculateSearchRelevanceScore(query)
+
+        assertTrue("Exact match score must be > prefix score", exactScore > prefixScore)
+        assertTrue("Prefix score must be > word boundary score", prefixScore > boundaryScore)
+        assertTrue("Boundary score must be > artist score", boundaryScore > artistScore)
+        assertTrue("Artist match score must be positive", artistScore > 0)
+        assertEquals("Irrelevant score must be -1", -1, irrelevantScore)
+    }
 }
+
 

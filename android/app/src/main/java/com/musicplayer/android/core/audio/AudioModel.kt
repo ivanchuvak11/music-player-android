@@ -196,3 +196,27 @@ data class PlaybackState(
         const val REPEAT_MODE_ALL = 2
     }
 }
+
+/**
+ * Calculates a relevance score for a track given a search query.
+ * Higher score = higher priority in search results.
+ * Negative score = non-relevant (does not match title or artist).
+ */
+fun AudioTrack.calculateSearchRelevanceScore(query: String): Int {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return 0
+    val t = title.trim().lowercase()
+    val a = artist.trim().lowercase()
+
+    return when {
+        t == q -> 1000 // Exact title match
+        t.startsWith(q) -> 800 // Title starts with query
+        t.contains(" $q") || t.contains("($q") -> 600 // Title contains word boundary
+        t.contains(q) -> 400 // Title contains query substring
+        a == q -> 300 // Exact artist match
+        a.startsWith(q) -> 200 // Artist starts with query
+        a.contains(q) -> 100 // Artist contains query
+        else -> -1 // Non-relevant (does not match query)
+    }
+}
+
