@@ -10,6 +10,7 @@ import android.media.audiofx.LoudnessEnhancer
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import com.musicplayer.android.core.session.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -191,7 +192,12 @@ object AudioEffectsManager {
                     addAction(android.content.Intent.ACTION_HEADSET_PLUG)
                     addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
                 }
-                appContext.registerReceiver(receiver, filter)
+                ContextCompat.registerReceiver(
+                    appContext,
+                    receiver,
+                    filter,
+                    ContextCompat.RECEIVER_NOT_EXPORTED
+                )
             } catch (e: Throwable) {
                 e.printStackTrace()
             }
@@ -508,6 +514,9 @@ object AudioEffectsManager {
      */
     @Synchronized
     fun release() {
+        persistenceJob?.cancel()
+        persistenceJob = null
+
         // Unregister listeners FIRST to prevent callbacks on dead hardware objects
         val am = audioManager
         try {

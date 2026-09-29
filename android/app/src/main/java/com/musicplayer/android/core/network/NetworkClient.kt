@@ -20,6 +20,8 @@ class AuthInterceptor : Interceptor {
 
     var onUnauthorizedListener: (() -> Unit)? = null
 
+    private val isHandling401 = java.util.concurrent.atomic.AtomicBoolean(false)
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val builder = original.newBuilder()
@@ -31,7 +33,16 @@ class AuthInterceptor : Interceptor {
 
         val response = chain.proceed(builder.build())
         if (response.code == 401 && !token.isNullOrBlank()) {
-            onUnauthorizedListener?.invoke()
+            if (isHandling401.compareAndSet(false, true)) {
+                try {
+                    onUnauthorizedListener?.invoke()
+                } finally {
+                    // Reset after 2 seconds to avoid rapid duplicate firings
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        isHandling401.set(false)
+                    }, 2000L)
+                }
+            }
         }
         return response
     }
