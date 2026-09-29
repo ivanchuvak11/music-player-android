@@ -15,14 +15,24 @@ import androidx.media3.session.MediaSessionService
 import com.musicplayer.android.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
  * Background MediaSessionService managing ExoPlayer lifecycle, caching, audio focus, WakeLock, and system audio session.
+ *
+ * Fix #21: Uses a lifecycle-bound serviceScope (SupervisorJob) so all AudioEffects init
+ * coroutines are cancelled in onDestroy(), preventing stale-session crashes on Samsung/Huawei.
+ *
+ * Fix #16: onTaskRemoved only stops the service when there is nothing loaded.
+ * Swiping the app from Recents while paused now keeps the service alive with its notification.
  */
 class MusicPlayerService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+    // Bound to the service lifecycle — cancelled in onDestroy()
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     @OptIn(UnstableApi::class)
     override fun onCreate() {
@@ -47,9 +57,6 @@ class MusicPlayerService : MediaSessionService() {
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
-        // H1 FIX: Use WAKE_MODE_LOCAL by default (saves battery for local files)
-        // Network wake lock is only needed for streaming, but ExoPlayer handles
-        // WiFi lock internally when streaming via CacheDataSource
         val player = ExoPlayer.Builder(this)
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(loadControl)
@@ -58,10 +65,10 @@ class MusicPlayerService : MediaSessionService() {
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
 
-        // Initialize AudioEffects on background thread to avoid ANR without accessing player off main thread
+        // Fix #21: Use serviceScope so init is cancelled when service is destroyed
         player.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(audioSessionId: Int) {
-                CoroutineScope(Dispatchers.IO).launch {
+                serviceScope.launch(Dispatchers.IO) {
                     AudioEffectsManager.init(audioSessionId)
                 }
             }
@@ -69,7 +76,7 @@ class MusicPlayerService : MediaSessionService() {
 
         val initialSessionId = player.audioSessionId
         if (initialSessionId != C.AUDIO_SESSION_ID_UNSET) {
-            CoroutineScope(Dispatchers.IO).launch {
+            serviceScope.launch(Dispatchers.IO) {
                 AudioEffectsManager.init(initialSessionId)
             }
         }
@@ -94,6 +101,8 @@ class MusicPlayerService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        // Cancel all pending AudioEffects coroutines before releasing player
+        serviceScope.cancel()
         AudioEffectsManager.release()
         mediaSession?.run {
             player.release()
@@ -107,8 +116,11 @@ class MusicPlayerService : MediaSessionService() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = mediaSession?.player
-        if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
+        // Fix #16: Only kill service when there is truly nothing playing/paused.
+        // If the user swiped recents while paused, preserve the service + notification.
+        if (player == null || player.mediaItemCount == 0) {
             stopSelf()
         }
+        // Otherwise: keep alive. The user can resume from the notification.
     }
 }

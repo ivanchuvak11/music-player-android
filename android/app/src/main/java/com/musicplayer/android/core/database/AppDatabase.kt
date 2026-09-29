@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LocalPlaylistEntity::class,
         LocalPlaylistTrackEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -62,6 +62,129 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Fix #14 + #30: Adds artworkUrl to cached_tracks and rebuilds playlist_tracks
+         * with ForeignKey CASCADE (SQLite requires a full table rebuild to add FK constraints).
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add artworkUrl to cached_tracks (nullable, old rows get NULL)
+                db.execSQL("ALTER TABLE cached_tracks ADD COLUMN artworkUrl TEXT")
+
+                // Rebuild playlist_tracks to add ForeignKey CASCADE + artworkUrl
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS playlist_tracks_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        playlistId INTEGER NOT NULL,
+                        trackId TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        artist TEXT NOT NULL,
+                        audioUrl TEXT NOT NULL,
+                        artworkUrl TEXT,
+                        durationMs INTEGER NOT NULL DEFAULT 0,
+                        isLocal INTEGER NOT NULL DEFAULT 1,
+                        addedAt INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY(playlistId) REFERENCES local_playlists(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    INSERT INTO playlist_tracks_new (id, playlistId, trackId, title, artist, audioUrl, artworkUrl, durationMs, isLocal, addedAt)
+                    SELECT id, playlistId, trackId, title, artist, audioUrl, NULL, durationMs, isLocal, addedAt FROM playlist_tracks
+                """.trimIndent())
+                db.execSQL("DROP TABLE playlist_tracks")
+                db.execSQL("ALTER TABLE playlist_tracks_new RENAME TO playlist_tracks")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_tracks_playlistId ON playlist_tracks(playlistId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_tracks_trackId ON playlist_tracks(trackId)")
+            }
+        }
+
+        private fun createFullSchema6(db: SupportSQLiteDatabase) {
+            db.execSQL("DROP TABLE IF EXISTS cached_tracks")
+            db.execSQL("DROP TABLE IF EXISTS favorite_tracks")
+            db.execSQL("DROP TABLE IF EXISTS play_history")
+            db.execSQL("DROP TABLE IF EXISTS local_playlists")
+            db.execSQL("DROP TABLE IF EXISTS playlist_tracks")
+
+            db.execSQL("""
+                CREATE TABLE cached_tracks (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    localFilePath TEXT,
+                    originalUrl TEXT NOT NULL,
+                    artworkUrl TEXT,
+                    durationMs INTEGER NOT NULL,
+                    cachedAtTimestamp INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_cached_tracks_cachedAtTimestamp ON cached_tracks(cachedAtTimestamp)")
+
+            db.execSQL("""
+                CREATE TABLE favorite_tracks (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    audioUrl TEXT NOT NULL,
+                    artworkUrl TEXT,
+                    durationMs INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+
+            db.execSQL("""
+                CREATE TABLE play_history (
+                    historyId INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    trackId TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    audioUrl TEXT NOT NULL,
+                    artworkUrl TEXT,
+                    durationMs INTEGER NOT NULL DEFAULT 0,
+                    lastPositionMs INTEGER NOT NULL DEFAULT 0,
+                    playedAtTimestamp INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_play_history_trackId ON play_history(trackId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_play_history_playedAtTimestamp ON play_history(playedAtTimestamp)")
+
+            db.execSQL("""
+                CREATE TABLE local_playlists (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    name TEXT NOT NULL,
+                    createdAt INTEGER NOT NULL
+                )
+            """.trimIndent())
+
+            db.execSQL("""
+                CREATE TABLE playlist_tracks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    playlistId INTEGER NOT NULL,
+                    trackId TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    audioUrl TEXT NOT NULL,
+                    artworkUrl TEXT,
+                    durationMs INTEGER NOT NULL DEFAULT 0,
+                    isLocal INTEGER NOT NULL DEFAULT 1,
+                    addedAt INTEGER NOT NULL DEFAULT 0,
+                    FOREIGN KEY(playlistId) REFERENCES local_playlists(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_tracks_playlistId ON playlist_tracks(playlistId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_tracks_trackId ON playlist_tracks(trackId)")
+        }
+
+        private val MIGRATION_1_6 = object : Migration(1, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                createFullSchema6(db)
+            }
+        }
+
+        private val MIGRATION_2_6 = object : Migration(2, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                createFullSchema6(db)
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -69,8 +192,19 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "music_player_db"
                 )
-                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(
+                        MIGRATION_1_6,
+                        MIGRATION_2_6,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6
+                    )
+                    .fallbackToDestructiveMigrationOnDowngrade()
+                    .addCallback(object : Callback() {
+                        override fun onOpen(db: SupportSQLiteDatabase) {
+                            db.execSQL("PRAGMA foreign_keys = ON")
+                        }
+                    })
                     .build()
                 INSTANCE = instance
                 instance

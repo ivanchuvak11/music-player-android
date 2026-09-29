@@ -70,10 +70,17 @@ object AudioCacheManager {
 
     fun getCacheSizeBytes(context: Context): Long {
         return try {
-            getCache(context).cacheSpace
+            // Fix #2: count both primary and alt cache directories
+            val primarySize = try { getCache(context).cacheSpace } catch (e: Exception) { 0L }
+            val altDir = File(context.cacheDir, "media_cache_alt")
+            val altSize = if (altDir.exists()) altDir.walkTopDown().filter { it.isFile }.sumOf { it.length() } else 0L
+            primarySize + altSize
         } catch (e: Exception) {
             val cacheDir = File(context.cacheDir, "media_cache")
-            if (cacheDir.exists()) cacheDir.walkTopDown().filter { it.isFile }.map { it.length() }.sum() else 0L
+            val primary = if (cacheDir.exists()) cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() } else 0L
+            val altDir = File(context.cacheDir, "media_cache_alt")
+            val alt = if (altDir.exists()) altDir.walkTopDown().filter { it.isFile }.sumOf { it.length() } else 0L
+            primary + alt
         }
     }
 
@@ -82,16 +89,16 @@ object AudioCacheManager {
         try {
             val cache = simpleCache
             if (cache != null) {
-                val keys = cache.keys
+                val keys = cache.keys.toList()  // snapshot to avoid concurrent modification
                 for (key in keys) {
-                    cache.removeResource(key)
-                }
-            } else {
-                val cacheDir = File(context.cacheDir, "media_cache")
-                if (cacheDir.exists()) {
-                    cacheDir.deleteRecursively()
+                    try { cache.removeResource(key) } catch (e: Exception) { e.printStackTrace() }
                 }
             }
+            // Fix #2: always delete BOTH directories regardless of simpleCache state
+            val primaryDir = File(context.cacheDir, "media_cache")
+            if (primaryDir.exists()) primaryDir.deleteRecursively()
+            val altDir = File(context.cacheDir, "media_cache_alt")
+            if (altDir.exists()) altDir.deleteRecursively()
         } catch (e: Exception) {
             e.printStackTrace()
         }

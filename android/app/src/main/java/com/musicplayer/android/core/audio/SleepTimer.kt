@@ -1,5 +1,6 @@
 package com.musicplayer.android.core.audio
 
+import android.os.SystemClock
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -13,6 +14,10 @@ import kotlinx.coroutines.launch
 /**
  * Manages the music sleep timer, providing remaining duration state and
  * executing a callback (e.g. pause playback) upon completion.
+ *
+ * Fix #8: Doze-mode resilient timer — uses SystemClock.elapsedRealtime() as
+ * the source of truth for remaining time instead of counting 1-second delays.
+ * When Doze extends a delay(), the countdown still advances correctly on wake.
  */
 object SleepTimer {
 
@@ -27,20 +32,24 @@ object SleepTimer {
 
     fun start(durationMinutes: Int, onFinish: () -> Unit) {
         cancel()
-        val totalSeconds = durationMinutes.toLong() * 60L
-        _remainingSeconds.value = totalSeconds
+        val totalMs = durationMinutes.toLong() * 60L * 1000L
+        // Record the absolute wall-clock deadline using elapsedRealtime (not affected by clock changes)
+        val endElapsedMs = SystemClock.elapsedRealtime() + totalMs
+
+        _remainingSeconds.value = durationMinutes.toLong() * 60L
         _isActive.value = true
 
         timerJob = scope.launch {
-            var current = totalSeconds
-            while (isActive && current > 0) {
+            while (isActive) {
+                val remainingMs = endElapsedMs - SystemClock.elapsedRealtime()
+                if (remainingMs <= 0L) break
+                // Emit actual remaining (Doze may have eaten several seconds)
+                _remainingSeconds.value = (remainingMs / 1000L).coerceAtLeast(0L)
                 delay(1000L)
-                current--
-                _remainingSeconds.value = current
             }
             _isActive.value = false
             _remainingSeconds.value = 0L
-            onFinish()
+            if (isActive) onFinish()
         }
     }
 

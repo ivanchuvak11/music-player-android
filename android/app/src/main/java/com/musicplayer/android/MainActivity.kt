@@ -33,6 +33,7 @@ import com.musicplayer.android.core.database.CachedTrackEntity
 import com.musicplayer.android.core.database.LocalPlaylistEntity
 import com.musicplayer.android.core.database.LocalPlaylistTrackEntity
 import com.musicplayer.android.core.network.RadioStationDto
+import com.musicplayer.android.core.audio.toAudioTrack
 import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 
 class MainActivity : ComponentActivity() {
@@ -110,6 +111,12 @@ fun PlayerCoreScreen() {
             if (idx >= 0) {
                 currentRadioIndex = idx
             }
+        }
+    }
+
+    LaunchedEffect(isServerConfigExpanded) {
+        if (isServerConfigExpanded) {
+            audioCacheSizeBytes = viewModel.getAudioCacheSizeBytes()
         }
     }
 
@@ -504,24 +511,15 @@ fun PlayerCoreScreen() {
                                     checked = audioEffectsState.isEnabled,
                                     onCheckedChange = { desired ->
                                         if (desired) {
-                                            val headphonesOk = AudioEffectsManager.isHeadphonesConnected(context)
-                                            if (!headphonesOk) {
+                                            val success = viewModel.setEqualizerEnabled(true)
+                                            if (!success) {
                                                 Toast.makeText(
                                                     context,
                                                     "🎧 Еквалайзер можна увімкнути лише з навушниками!",
                                                     Toast.LENGTH_SHORT
                                                 ).show()
                                             } else {
-                                                val success = viewModel.setEqualizerEnabled(true)
-                                                if (!success) {
-                                                    Toast.makeText(
-                                                        context,
-                                                        "🎧 Підключіть навушники для використання еквалайзера!",
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-                                                } else {
-                                                    Toast.makeText(context, "🎚 Еквалайзер увімкнено", Toast.LENGTH_SHORT).show()
-                                                }
+                                                Toast.makeText(context, "🎚 Еквалайзер увімкнено", Toast.LENGTH_SHORT).show()
                                             }
                                         } else {
                                             viewModel.setEqualizerEnabled(false)
@@ -665,7 +663,7 @@ fun PlayerCoreScreen() {
                                 modifier = Modifier.weight(1f),
                                 onClick = {
                                     if (emailInput.isNotBlank() && passwordInput.isNotBlank()) {
-                                        viewModel.login(emailInput.trim(), passwordInput.trim())
+                                        viewModel.login(emailInput.trim(), passwordInput)
                                     } else {
                                         Toast.makeText(context, "Введіть email та пароль", Toast.LENGTH_SHORT).show()
                                     }
@@ -678,7 +676,7 @@ fun PlayerCoreScreen() {
                                 onClick = {
                                     if (emailInput.isNotBlank() && passwordInput.isNotBlank()) {
                                         val uname = emailInput.substringBefore("@")
-                                        viewModel.register(uname, emailInput.trim(), passwordInput.trim())
+                                        viewModel.register(uname, emailInput.trim(), passwordInput)
                                     } else {
                                         Toast.makeText(context, "Введіть email та пароль", Toast.LENGTH_SHORT).show()
                                     }
@@ -894,7 +892,7 @@ fun PlayerCoreScreen() {
             val filteredCached = cachedTracks.filter {
                 it.title.contains(q, ignoreCase = true) || it.artist.contains(q, ignoreCase = true)
             }
-            val onlineResults = searchedJamendo.map { AudioTrack.fromJamendo(it) } +
+            val onlineResults = searchedJamendo.map { AudioTrack.fromJamendo(it, viewModel.getBaseUrl()) } +
                 searchedAudius.map { AudioTrack.fromAudius(it, viewModel.getBaseUrl()) }
 
             val totalFound = filteredLocal.size + filteredCached.size + onlineResults.size
@@ -951,18 +949,7 @@ fun PlayerCoreScreen() {
                 items(filteredCached) { cached ->
                     CachedTrackRow(
                         cached = cached,
-                        onPlay = {
-                            viewModel.playTrack(
-                                AudioTrack(
-                                    id = cached.id,
-                                    title = cached.title,
-                                    artist = cached.artist,
-                                    audioUrl = cached.localFilePath ?: cached.originalUrl,
-                                    durationMs = cached.durationMs,
-                                    isLocal = cached.localFilePath != null
-                                )
-                            )
-                        },
+                        onPlay = { viewModel.playTrack(cached.toAudioTrack()) },
                         onDelete = { viewModel.removeCachedTrack(cached.id) }
                     )
                 }
@@ -1138,15 +1125,7 @@ fun PlayerCoreScreen() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            val track = AudioTrack(
-                                id = histItem.trackId,
-                                title = histItem.title,
-                                artist = histItem.artist,
-                                audioUrl = histItem.audioUrl,
-                                artworkUrl = histItem.artworkUrl,
-                                durationMs = histItem.durationMs
-                            )
-                            viewModel.playTrack(track)
+                            viewModel.playTrack(histItem.toAudioTrack())
                         },
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -1200,16 +1179,7 @@ fun PlayerCoreScreen() {
                             if (localFavorites.isNotEmpty()) {
                                 Button(
                                     onClick = {
-                                        val favTracks = localFavorites.map { fav ->
-                                            AudioTrack(
-                                                id = fav.id,
-                                                title = fav.title,
-                                                artist = fav.artist,
-                                                audioUrl = fav.audioUrl,
-                                                artworkUrl = fav.artworkUrl,
-                                                durationMs = fav.durationMs
-                                            )
-                                        }
+                                        val favTracks = localFavorites.map { it.toAudioTrack() }
                                         viewModel.playQueue(favTracks, 0)
                                     },
                                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
@@ -1237,14 +1207,7 @@ fun PlayerCoreScreen() {
 
         if (isFavoritesExpanded && localFavorites.isNotEmpty()) {
             items(localFavorites) { favItem ->
-                val track = AudioTrack(
-                    id = favItem.id,
-                    title = favItem.title,
-                    artist = favItem.artist,
-                    audioUrl = favItem.audioUrl,
-                    artworkUrl = favItem.artworkUrl,
-                    durationMs = favItem.durationMs
-                )
+                val track = favItem.toAudioTrack()
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1955,17 +1918,7 @@ fun TrackItemRow(
                 Spacer(modifier = Modifier.width(6.dp))
             }
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable {
-                        if (isSelectionMode && onToggleSelect != null) {
-                            onToggleSelect()
-                        } else if (onTrackCardClick != null) {
-                            onTrackCardClick()
-                        } else {
-                            onPlay()
-                        }
-                    }
+                modifier = Modifier.weight(1f)
             ) {
                 Text(
                     text = track.title,
@@ -2106,15 +2059,7 @@ fun LocalPlaylistCard(
                                 )
                             }
                             IconButton(onClick = {
-                                val audioTrack = AudioTrack(
-                                    id = trackEntity.trackId,
-                                    title = trackEntity.title,
-                                    artist = trackEntity.artist,
-                                    audioUrl = trackEntity.audioUrl,
-                                    durationMs = trackEntity.durationMs,
-                                    isLocal = trackEntity.isLocal
-                                )
-                                viewModel.playTrack(audioTrack)
+                                viewModel.playTrack(trackEntity.toAudioTrack())
                             }) {
                                 Text("▶", fontSize = 14.sp)
                             }

@@ -71,6 +71,18 @@ data class AudioEffectsState(
 /**
  * Singleton managing hardware Equalizer, BassBoost, and LoudnessEnhancer
  * attached to the ExoPlayer audio session. Requires headphones/headset to enable.
+ *
+ * Fix #11: release() now properly unregisters AudioDeviceCallback and BroadcastReceiver
+ * to prevent memory leaks when the audio session is recycled.
+ *
+ * Fix #12: restorePersistedState() re-applies hardware DSP after state is loaded, so the
+ * hardware EQ matches the UI state (no more "EQ shows ON but DSP is OFF" mismatch).
+ *
+ * Fix #13: isHeadphonesConnected() now also checks USB-C DAC, AUX analog line, and BLE
+ * audio so users with adapters can enable the equalizer.
+ *
+ * Fix #20: release() resets currentSessionId = 0 inside a finally block so the next
+ * init() after a zombie singleton state is never silently ignored.
  */
 object AudioEffectsManager {
 
@@ -81,6 +93,8 @@ object AudioEffectsManager {
     private var audioManager: AudioManager? = null
     private var audioDeviceCallback: AudioDeviceCallback? = null
     private var headsetReceiver: android.content.BroadcastReceiver? = null
+    // Fix #11: keep context reference so we can unregister the receiver in release()
+    private var appContextRef: Context? = null
 
     private val _effectsState = MutableStateFlow(AudioEffectsState())
     val effectsState: StateFlow<AudioEffectsState> = _effectsState.asStateFlow()
@@ -99,7 +113,11 @@ object AudioEffectsManager {
                     AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
                     AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
                     AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
-                    AudioDeviceInfo.TYPE_USB_HEADSET -> true
+                    AudioDeviceInfo.TYPE_USB_HEADSET,
+                    // Fix #13: USB-C DAC / AUX analog / digital line adapters
+                    AudioDeviceInfo.TYPE_USB_DEVICE,
+                    AudioDeviceInfo.TYPE_LINE_ANALOG,
+                    AudioDeviceInfo.TYPE_LINE_DIGITAL -> true
                     else -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             device.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
@@ -131,6 +149,7 @@ object AudioEffectsManager {
     @Synchronized
     fun registerAudioDeviceCallback(context: Context) {
         val appContext = context.applicationContext
+        appContextRef = appContext  // Fix #11: store for unregister in release()
         val am = audioManager ?: (appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.also {
             audioManager = it
         } ?: return
@@ -190,6 +209,7 @@ object AudioEffectsManager {
     @Synchronized
     fun init(audioSessionId: Int) {
         if (audioSessionId == 0 || audioSessionId == currentSessionId) return
+        // Fix #20: release() resets currentSessionId; if it throws, still continue with new session
         release()
         currentSessionId = audioSessionId
 
@@ -251,15 +271,7 @@ object AudioEffectsManager {
         val appContext = context?.applicationContext
         val headphonesConnected = appContext?.let { isHeadphonesConnected(it) } ?: _effectsState.value.isHeadphonesConnected
 
-        val actualEnabled = if (enabled) {
-            if (!headphonesConnected) {
-                false
-            } else {
-                true
-            }
-        } else {
-            false
-        }
+        val actualEnabled = enabled && headphonesConnected
 
         if (actualEnabled) {
             try {
@@ -430,6 +442,10 @@ object AudioEffectsManager {
         setLoudnessEnhancerGain(0)
     }
 
+    /**
+     * Fix #12: After restoring UI state from SharedPrefs, re-apply hardware DSP so the
+     * equalizer hardware matches the UI state ("on" in UI = actually on in DSP).
+     */
     fun restorePersistedState(context: Context) {
         try {
             val appContext = context.applicationContext
@@ -441,6 +457,7 @@ object AudioEffectsManager {
             val preset = sessionManager.getEqualizerPreset()
             val bass = sessionManager.getEqualizerBassBoost()
             val levels = sessionManager.getEqualizerBandLevels(_effectsState.value.numberOfBands.toInt())
+
             _effectsState.value = _effectsState.value.copy(
                 isEnabled = actualEnabled,
                 isHeadphonesConnected = headphonesConnected,
@@ -448,6 +465,12 @@ object AudioEffectsManager {
                 bassBoostStrength = bass,
                 bandLevels = levels
             )
+
+            // Fix #12: If hardware session already exists, apply effects immediately to sync DSP
+            if (currentSessionId != 0 && actualEnabled) {
+                setEnabled(true, appContext)
+                if (bass > 0) setBassBoost(bass, appContext)
+            }
         } catch (e: Throwable) {
             e.printStackTrace()
         }
@@ -469,8 +492,28 @@ object AudioEffectsManager {
         }
     }
 
+    /**
+     * Fix #11: Properly unregisters AudioDeviceCallback and BroadcastReceiver.
+     * Fix #20: currentSessionId is always reset (in finally) so the next init() is never skipped.
+     */
     @Synchronized
     fun release() {
+        // Unregister listeners FIRST to prevent callbacks on dead hardware objects
+        val am = audioManager
+        try {
+            audioDeviceCallback?.let { am?.unregisterAudioDeviceCallback(it) }
+            audioDeviceCallback = null
+        } catch (e: Throwable) {
+            e.printStackTrace()
+        }
+        try {
+            val ctx = appContextRef
+            headsetReceiver?.let { ctx?.unregisterReceiver(it) }
+            headsetReceiver = null
+        } catch (e: Throwable) {
+            e.printStackTrace()
+        }
+
         try {
             equalizer?.release()
             bassBoost?.release()
@@ -481,6 +524,7 @@ object AudioEffectsManager {
             equalizer = null
             bassBoost = null
             loudnessEnhancer = null
+            // Fix #20: always reset so next init() is not ignored
             currentSessionId = 0
         }
     }
