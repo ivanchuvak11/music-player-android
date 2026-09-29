@@ -119,6 +119,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
 
+    // Security & Encrypted SharedPreferences
+    implementation(libs.androidx.security.crypto)
+
     // Unit Testing
     testImplementation("junit:junit:4.13.2")
 }

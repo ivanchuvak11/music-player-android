@@ -1,4 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Music Player</string>
+    <string name="app_subtitle">Повна функціональна панель: плеєр, авторизація, радіо, база Room</string>
+    <string name="status_online">🟢 Онлайн</string>
+    <string name="status_offline">🔴 Офлайн</string>
+    <string name="offline_banner_text">Ви зараз офлайн. Треки з пам\'яті телефону доступні для прослуховування!</string>
+    <string name="btn_play">Відтворити</string>
+    <string name="btn_pause">Пауза</string>
+    <string name="btn_next">Наступний</string>
+    <string name="btn_previous">Попередній</string>
+    <string name="btn_clear_cache">Очистити кеш</string>
+    <string name="nav_tracks">Треки</string>
+    <string name="nav_playlists">Плейлисти</string>
+    <string name="nav_radio">Радіо</string>
+    <string name="nav_favorites">Улюблені</string>
+    <string name="nav_search">Пошук</string>
+    <string name="nav_settings">Налаштування</string>
+    <string name="search_placeholder">Пошук пісень, авторів чи радіо…</string>
+    <string name="tab_all">Всі</string>
+    <string name="tab_local">Локальні</string>
+    <string name="tab_online">Онлайн</string>
+    <string name="error_network_generic">Немає з\'єднання з мережею</string>
+    <string name="error_jamendo_unavailable">Jamendo сервіс тимчасово недоступний</string>
 </resources>

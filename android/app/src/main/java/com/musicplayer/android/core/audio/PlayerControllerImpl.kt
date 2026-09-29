@@ -204,10 +204,13 @@ class PlayerControllerImpl(
                 if (controller != null && controller.isPlaying) {
                     val currentPos = controller.currentPosition.coerceAtLeast(0L)
                     val dur = controller.duration.coerceAtLeast(0L)
-                    _playbackState.value = _playbackState.value.copy(
-                        currentPositionMs = currentPos,
-                        durationMs = dur
-                    )
+                    val currentState = _playbackState.value
+                    if (kotlin.math.abs(currentState.currentPositionMs - currentPos) >= 200L || currentState.durationMs != dur) {
+                        _playbackState.value = currentState.copy(
+                            currentPositionMs = currentPos,
+                            durationMs = dur
+                        )
+                    }
                 }
                 delay(500)
             }

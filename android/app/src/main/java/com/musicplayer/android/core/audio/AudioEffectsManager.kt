@@ -488,6 +488,7 @@ object AudioEffectsManager {
         val appContext = context.applicationContext
         persistenceJob?.cancel()
         persistenceJob = persistenceScope.launch {
+            kotlinx.coroutines.delay(300L) // Debounce fast slider dragging
             try {
                 SessionManager.getInstance(appContext).saveEqualizerState(
                     enabled = state.isEnabled,

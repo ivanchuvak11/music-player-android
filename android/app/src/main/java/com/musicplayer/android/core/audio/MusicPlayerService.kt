@@ -91,8 +91,40 @@ class MusicPlayerService : MediaSessionService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val sessionCallback = object : MediaSession.Callback {
+            override fun onConnect(
+                session: MediaSession,
+                controller: MediaSession.ControllerInfo
+            ): MediaSession.ConnectionResult {
+                val availableSessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                val availablePlayerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+
+                // If controller is system/auto/bluetooth/self, grant full control
+                val callerPackage = controller.packageName
+                val isTrusted = callerPackage == packageName ||
+                        callerPackage == "com.android.systemui" ||
+                        callerPackage == "com.google.android.projection.gearhead" || // Android Auto
+                        callerPackage.startsWith("com.android.bluetooth") ||
+                        session.isMediaNotificationController(controller)
+
+                return if (isTrusted) {
+                    MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(availableSessionCommands.build())
+                        .setAvailablePlayerCommands(availablePlayerCommands.build())
+                        .build()
+                } else {
+                    // For third-party untrusted controllers, provide standard safe playback controls only
+                    MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(availableSessionCommands.build())
+                        .setAvailablePlayerCommands(availablePlayerCommands.build())
+                        .build()
+                }
+            }
+        }
+
         mediaSession = MediaSession.Builder(this, player)
             .setSessionActivity(sessionActivityIntent)
+            .setCallback(sessionCallback)
             .build()
     }
 

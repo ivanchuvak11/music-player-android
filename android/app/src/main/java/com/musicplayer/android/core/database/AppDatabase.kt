@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         LocalPlaylistEntity::class,
         LocalPlaylistTrackEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -98,7 +98,7 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        private fun createFullSchema6(db: SupportSQLiteDatabase) {
+        private fun createFullSchema7(db: SupportSQLiteDatabase) {
             db.execSQL("DROP TABLE IF EXISTS cached_tracks")
             db.execSQL("DROP TABLE IF EXISTS favorite_tracks")
             db.execSQL("DROP TABLE IF EXISTS play_history")
@@ -126,9 +126,11 @@ abstract class AppDatabase : RoomDatabase() {
                     artist TEXT NOT NULL,
                     audioUrl TEXT NOT NULL,
                     artworkUrl TEXT,
-                    durationMs INTEGER NOT NULL DEFAULT 0
+                    durationMs INTEGER NOT NULL,
+                    favoritedAtTimestamp INTEGER NOT NULL
                 )
             """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_favorite_tracks_favoritedAtTimestamp ON favorite_tracks(favoritedAtTimestamp)")
 
             db.execSQL("""
                 CREATE TABLE play_history (
@@ -173,15 +175,27 @@ abstract class AppDatabase : RoomDatabase() {
             db.execSQL("CREATE INDEX IF NOT EXISTS index_playlist_tracks_trackId ON playlist_tracks(trackId)")
         }
 
-        private val MIGRATION_1_6 = object : Migration(1, 6) {
+        private val MIGRATION_1_7 = object : Migration(1, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createFullSchema6(db)
+                createFullSchema7(db)
             }
         }
 
-        private val MIGRATION_2_6 = object : Migration(2, 6) {
+        private val MIGRATION_2_7 = object : Migration(2, 7) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                createFullSchema6(db)
+                createFullSchema7(db)
+            }
+        }
+
+        private val MIGRATION_5_7 = object : Migration(5, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                createFullSchema7(db)
+            }
+        }
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                createFullSchema7(db)
             }
         }
 
@@ -193,13 +207,24 @@ abstract class AppDatabase : RoomDatabase() {
                     "music_player_db"
                 )
                     .addMigrations(
-                        MIGRATION_1_6,
-                        MIGRATION_2_6,
+                        MIGRATION_1_7,
+                        MIGRATION_2_7,
                         MIGRATION_3_4,
                         MIGRATION_4_5,
-                        MIGRATION_5_6
-                    )
-                    .fallbackToDestructiveMigrationOnDowngrade()
+                        MIGRATION_5_6,
+                        MIGRATION_5_7,
+                        MIGRATION_6_7
+                    ).apply {
+                        val isDebug = try {
+                            (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                        } catch (e: Exception) {
+                            false
+                        }
+                        if (isDebug) {
+                            fallbackToDestructiveMigration()
+                            fallbackToDestructiveMigrationOnDowngrade()
+                        }
+                    }
                     .addCallback(object : Callback() {
                         override fun onOpen(db: SupportSQLiteDatabase) {
                             db.execSQL("PRAGMA foreign_keys = ON")

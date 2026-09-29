@@ -61,12 +61,12 @@ data class AudioTrack(
             )
         }
 
-        fun fromJamendo(track: JamendoTrackDto, backendBaseUrl: String = "http://10.0.2.2:5116/"): AudioTrack {
-            val streamUri = if (!track.streamUrl.isNullOrBlank()) {
-                track.streamUrl
-            } else {
-                "${backendBaseUrl.trimEnd('/')}/api/jamendo/tracks/${track.externalId}/stream"
-            }
+        fun fromJamendo(track: JamendoTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack {
+            val streamUri = com.musicplayer.android.core.network.ServerConfig.resolveJamendoStreamUrl(
+                track.externalId,
+                track.streamUrl,
+                backendBaseUrl
+            )
             return AudioTrack(
                 id = "jamendo_${track.externalId}",
                 title = track.title,
@@ -92,8 +92,11 @@ data class AudioTrack(
             )
         }
 
-        fun fromAudius(track: AudiusTrackDto, backendBaseUrl: String = "http://10.0.2.2:5116/"): AudioTrack {
-            val streamUri = "${backendBaseUrl.trimEnd('/')}/api/audius/tracks/${track.externalId}/stream"
+        fun fromAudius(track: AudiusTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack {
+            val streamUri = com.musicplayer.android.core.network.ServerConfig.resolveAudiusStreamUrl(
+                track.externalId,
+                backendBaseUrl
+            )
             return AudioTrack(
                 id = "audius_${track.externalId}",
                 title = track.title,
@@ -106,12 +109,12 @@ data class AudioTrack(
             )
         }
 
-        fun fromSoundCloud(track: SoundCloudTrackDto, backendBaseUrl: String = "http://10.0.2.2:5116/"): AudioTrack {
-            val streamUri = if (!track.streamUrl.isNullOrBlank()) {
-                track.streamUrl
-            } else {
-                "${backendBaseUrl.trimEnd('/')}/api/soundcloud/tracks/${track.externalId}/stream"
-            }
+        fun fromSoundCloud(track: SoundCloudTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack {
+            val streamUri = com.musicplayer.android.core.network.ServerConfig.resolveSoundCloudStreamUrl(
+                track.externalId,
+                track.streamUrl,
+                backendBaseUrl
+            )
             return AudioTrack(
                 id = "soundcloud_${track.externalId}",
                 title = track.title,
