@@ -21,6 +21,17 @@ import kotlinx.coroutines.launch
 
 /**
  * Concrete implementation of PlayerController connecting to MusicPlayerService via MediaController.
+ *
+ * Fix #3 (pending queue): User taps a track before controller is ready — the queue/play
+ * request is stored and executed immediately when the controller connects.
+ *
+ * Fix #4 (audio pop): volume restored to 1.0f AFTER pause() call, not in finally{} which
+ * fires while audio is still draining.
+ *
+ * Fix #5 (IndexOutOfBounds): On reconnect, currentQueue is synced from controller's actual
+ * media item count so removeFromQueue() can never crash.
+ *
+ * Fix #6 (infinite skip loop): Consecutive error counter stops auto-skip after 3 failures.
  */
 class PlayerControllerImpl(
     private val context: Context,
@@ -39,6 +50,14 @@ class PlayerControllerImpl(
     private var pendingShuffleMode: Boolean? = null
     private var pendingRepeatMode: Int? = null
 
+    // Fix #3: pending queue/play stored when controller not yet connected
+    private data class PendingQueue(val tracks: List<AudioTrack>, val startIndex: Int, val autoPlay: Boolean)
+    private var pendingQueue: PendingQueue? = null
+
+    // Fix #6: consecutive error counter to break infinite skip loops
+    private var consecutiveErrors = 0
+    private val maxConsecutiveErrors = 3
+
     init {
         initializeController()
     }
@@ -49,16 +68,40 @@ class PlayerControllerImpl(
         controllerFuture?.addListener({
             try {
                 mediaController = controllerFuture?.get()
-                setupPlayerListener()
-                pendingShuffleMode?.let { mediaController?.shuffleModeEnabled = it }
+                val controller = mediaController ?: return@addListener
+
+                // Fix #5: Sync local queue from service's actual item count on reconnect
+                if (controller.mediaItemCount > 0 && currentQueue.isEmpty()) {
+                    val restored = mutableListOf<AudioTrack>()
+                    for (i in 0 until controller.mediaItemCount) {
+                        val item = controller.getMediaItemAt(i)
+                        val dur = if (i == controller.currentMediaItemIndex)
+                            controller.duration.coerceAtLeast(0L) else 0L
+                        restored.add(AudioTrack.fromMediaItem(item, dur))
+                    }
+                    currentQueue = restored
+                }
+
+                // Apply pending shuffle/repeat preferences
+                pendingShuffleMode?.let { controller.shuffleModeEnabled = it }
                 pendingRepeatMode?.let { mode ->
-                    mediaController?.repeatMode = when (mode) {
+                    controller.repeatMode = when (mode) {
                         PlaybackState.REPEAT_MODE_ONE -> Player.REPEAT_MODE_ONE
                         PlaybackState.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ALL
                         else -> Player.REPEAT_MODE_OFF
                     }
                 }
+                pendingShuffleMode = null
+                pendingRepeatMode = null
+
+                setupPlayerListener()
                 updateState()
+
+                // Fix #3: Replay pending setQueue call now that controller is ready
+                pendingQueue?.let { pq ->
+                    pendingQueue = null
+                    setQueue(pq.tracks, pq.startIndex, pq.autoPlay)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -81,6 +124,8 @@ class PlayerControllerImpl(
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // Fix #6: Reset error counter on any successful track transition
+                consecutiveErrors = 0
                 _playbackState.value = _playbackState.value.copy(errorMessage = null)
                 updateState()
             }
@@ -119,15 +164,21 @@ class PlayerControllerImpl(
                     isPlaying = false
                 )
 
-                // If next track exists in queue, automatically retry with next item
+                // Fix #6: Auto-skip to next, but stop after maxConsecutiveErrors to prevent infinite loop
                 val controller = mediaController
                 if (controller != null && controller.hasNextMediaItem()) {
-                    scope.launch {
-                        delay(2500)
-                        if (_playbackState.value.errorMessage != null && controller.hasNextMediaItem()) {
-                            controller.seekToNextMediaItem()
-                            controller.play()
+                    consecutiveErrors++
+                    if (consecutiveErrors <= maxConsecutiveErrors) {
+                        scope.launch {
+                            delay(2500)
+                            if (_playbackState.value.errorMessage != null && controller.hasNextMediaItem()) {
+                                controller.seekToNextMediaItem()
+                                controller.play()
+                            }
                         }
+                    } else {
+                        // Exhausted retries — clear error and stop attempting auto-skip
+                        consecutiveErrors = 0
                     }
                 }
             }
@@ -192,17 +243,17 @@ class PlayerControllerImpl(
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         fadeJob = scope.launch {
             try {
-                controller.volume = 0.2f
+                controller.volume = 0.6f
                 controller.play()
-                val steps = 4
-                val stepDelay = 35L
+                val steps = 2
+                val stepDelay = 20L
                 for (i in 1..steps) {
                     delay(stepDelay)
-                    controller.volume = 0.2f + (0.8f * i / steps)
+                    controller.volume = 0.6f + (0.4f * i / steps)
                 }
+                controller.volume = 1.0f
             } catch (e: Exception) {
                 controller.play()
-            } finally {
                 controller.volume = 1.0f
             }
         }
@@ -213,16 +264,17 @@ class PlayerControllerImpl(
         fadeJob?.cancel()
         fadeJob = scope.launch {
             try {
-                val steps = 5
-                val stepDelay = 35L
+                val steps = 2
+                val stepDelay = 20L
                 for (i in (steps - 1) downTo 0) {
                     controller.volume = i.toFloat() / steps
                     delay(stepDelay)
                 }
+                // Fix #4: Reset volume AFTER pause so there is no audio left to pop
                 controller.pause()
+                controller.volume = 1.0f
             } catch (e: Exception) {
                 controller.pause()
-            } finally {
                 controller.volume = 1.0f
             }
         }
@@ -230,11 +282,13 @@ class PlayerControllerImpl(
 
     override fun playNext() {
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
+        consecutiveErrors = 0
         mediaController?.seekToNextMediaItem()
     }
 
     override fun playPrevious() {
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
+        consecutiveErrors = 0
         mediaController?.seekToPreviousMediaItem()
     }
 
@@ -247,12 +301,16 @@ class PlayerControllerImpl(
         currentQueue = tracks
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         val mediaItems = tracks.map { it.toMediaItem() }
-        mediaController?.apply {
-            setMediaItems(mediaItems, startIndex, 0L)
-            prepare()
-            if (autoPlay) {
-                play()
-            }
+        val controller = mediaController
+        if (controller == null) {
+            // Fix #3: Store for replay when controller becomes available
+            pendingQueue = PendingQueue(tracks, startIndex, autoPlay)
+            return
+        }
+        controller.setMediaItems(mediaItems, startIndex, 0L)
+        controller.prepare()
+        if (autoPlay) {
+            controller.play()
         }
         updateState()
     }
@@ -322,7 +380,9 @@ class PlayerControllerImpl(
 
     override fun removeFromQueue(index: Int) {
         val controller = mediaController ?: return
-        if (index in 0 until controller.mediaItemCount) {
+        // Fix #5: Guard against stale queue mismatch that caused IndexOutOfBoundsException
+        val safeQueueSize = minOf(currentQueue.size, controller.mediaItemCount)
+        if (index in 0 until safeQueueSize) {
             currentQueue = currentQueue.toMutableList().apply { removeAt(index) }
             controller.removeMediaItem(index)
             updateState()
@@ -334,5 +394,6 @@ class PlayerControllerImpl(
         stopProgressTracker()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         mediaController = null
+        pendingQueue = null
     }
 }

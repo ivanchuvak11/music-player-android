@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.musicplayer.android.core.audio.AudioEffectsManager
 import com.musicplayer.android.core.audio.AudioEffectsState
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.PlaybackState
@@ -32,6 +33,7 @@ import com.musicplayer.android.core.database.CachedTrackEntity
 import com.musicplayer.android.core.database.LocalPlaylistEntity
 import com.musicplayer.android.core.database.LocalPlaylistTrackEntity
 import com.musicplayer.android.core.network.RadioStationDto
+import com.musicplayer.android.core.audio.toAudioTrack
 import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 
 class MainActivity : ComponentActivity() {
@@ -77,6 +79,8 @@ fun PlayerCoreScreen() {
     val isOnline by viewModel.isOnline.collectAsState()
 
     val audioEffectsState by viewModel.audioEffectsState.collectAsState()
+    val isSleepTimerActive by viewModel.isSleepTimerActive.collectAsState()
+    val sleepTimerRemainingSeconds by viewModel.sleepTimerRemainingSeconds.collectAsState()
     val localFavorites by viewModel.localFavorites.collectAsState()
     val playHistory by viewModel.playHistory.collectAsState()
     val localPlaylists by viewModel.localPlaylists.collectAsState()
@@ -96,6 +100,8 @@ fun PlayerCoreScreen() {
     var passwordInput by remember { mutableStateOf("") }
     var newPlaylistName by remember { mutableStateOf("") }
     var showNowPlayingSheet by remember { mutableStateOf(false) }
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
+    var isFavoritesExpanded by remember { mutableStateOf(true) }
 
     LaunchedEffect(playbackState.currentTrack) {
         val track = playbackState.currentTrack
@@ -105,6 +111,12 @@ fun PlayerCoreScreen() {
             if (idx >= 0) {
                 currentRadioIndex = idx
             }
+        }
+    }
+
+    LaunchedEffect(isServerConfigExpanded) {
+        if (isServerConfigExpanded) {
+            audioCacheSizeBytes = viewModel.getAudioCacheSizeBytes()
         }
     }
 
@@ -379,21 +391,37 @@ fun PlayerCoreScreen() {
 
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    // Modes: Shuffle & Repeat
+                    // Modes: Shuffle & Repeat & Sleep Timer
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        OutlinedButton(onClick = { viewModel.toggleShuffle() }) {
-                            Text(if (playbackState.shuffleModeEnabled) "🔀 Shuffle: ON" else "🔀 Shuffle: OFF")
+                        OutlinedButton(
+                            onClick = { viewModel.toggleShuffle() },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            Text(if (playbackState.shuffleModeEnabled) "🔀 ON" else "🔀 OFF", fontSize = 11.sp)
                         }
-                        OutlinedButton(onClick = { viewModel.cycleRepeatMode() }) {
+                        OutlinedButton(
+                            onClick = { viewModel.cycleRepeatMode() },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
                             val repeatText = when (playbackState.repeatMode) {
-                                PlaybackState.REPEAT_MODE_ONE -> "🔂 Повтор: 1"
-                                PlaybackState.REPEAT_MODE_ALL -> "🔁 Повтор: Всі"
-                                else -> "🔁 Повтор: Вимк"
+                                PlaybackState.REPEAT_MODE_ONE -> "🔂 1"
+                                PlaybackState.REPEAT_MODE_ALL -> "🔁 Всі"
+                                else -> "🔁 Вимк"
                             }
-                            Text(repeatText)
+                            Text(repeatText, fontSize = 11.sp)
+                        }
+                        OutlinedButton(
+                            onClick = { showSleepTimerDialog = true },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                        ) {
+                            val timerText = if (isSleepTimerActive) "🌙 ${sleepTimerRemainingSeconds / 60}хв" else "🌙 Сон"
+                            Text(timerText, fontSize = 11.sp)
                         }
                     }
                 }
@@ -414,12 +442,19 @@ fun PlayerCoreScreen() {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "🎚 Еквалайзер та Ефекти",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Column {
+                            Text(
+                                text = "🎚 Еквалайзер та Ефекти",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = if (audioEffectsState.isHeadphonesConnected) "🎧 Навушники підключено" else "🎧 Тільки в навушниках",
+                                fontSize = 10.sp,
+                                color = if (audioEffectsState.isHeadphonesConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            )
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 text = if (audioEffectsState.isEnabled) "Увімк: ${audioEffectsState.currentPreset}" else "Вимкнено",
@@ -433,6 +468,28 @@ fun PlayerCoreScreen() {
 
                     if (isEqualizerExpanded) {
                         Spacer(modifier = Modifier.height(10.dp))
+
+                        if (!audioEffectsState.isHeadphonesConnected) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("🎧", fontSize = 16.sp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Підключіть навушники (дротові, Bluetooth або Type-C), щоб увімкнути еквалайзер.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -452,7 +509,23 @@ fun PlayerCoreScreen() {
                                 }
                                 Switch(
                                     checked = audioEffectsState.isEnabled,
-                                    onCheckedChange = { viewModel.setEqualizerEnabled(it) }
+                                    onCheckedChange = { desired ->
+                                        if (desired) {
+                                            val success = viewModel.setEqualizerEnabled(true)
+                                            if (!success) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "🎧 Еквалайзер можна увімкнути лише з навушниками!",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else {
+                                                Toast.makeText(context, "🎚 Еквалайзер увімкнено", Toast.LENGTH_SHORT).show()
+                                            }
+                                        } else {
+                                            viewModel.setEqualizerEnabled(false)
+                                            Toast.makeText(context, "Еквалайзер вимкнено (чистий звук)", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
                                 )
                             }
                         }
@@ -590,7 +663,7 @@ fun PlayerCoreScreen() {
                                 modifier = Modifier.weight(1f),
                                 onClick = {
                                     if (emailInput.isNotBlank() && passwordInput.isNotBlank()) {
-                                        viewModel.login(emailInput.trim(), passwordInput.trim())
+                                        viewModel.login(emailInput.trim(), passwordInput)
                                     } else {
                                         Toast.makeText(context, "Введіть email та пароль", Toast.LENGTH_SHORT).show()
                                     }
@@ -603,7 +676,7 @@ fun PlayerCoreScreen() {
                                 onClick = {
                                     if (emailInput.isNotBlank() && passwordInput.isNotBlank()) {
                                         val uname = emailInput.substringBefore("@")
-                                        viewModel.register(uname, emailInput.trim(), passwordInput.trim())
+                                        viewModel.register(uname, emailInput.trim(), passwordInput)
                                     } else {
                                         Toast.makeText(context, "Введіть email та пароль", Toast.LENGTH_SHORT).show()
                                     }
@@ -819,7 +892,7 @@ fun PlayerCoreScreen() {
             val filteredCached = cachedTracks.filter {
                 it.title.contains(q, ignoreCase = true) || it.artist.contains(q, ignoreCase = true)
             }
-            val onlineResults = searchedJamendo.map { AudioTrack.fromJamendo(it) } +
+            val onlineResults = searchedJamendo.map { AudioTrack.fromJamendo(it, viewModel.getBaseUrl()) } +
                 searchedAudius.map { AudioTrack.fromAudius(it, viewModel.getBaseUrl()) }
 
             val totalFound = filteredLocal.size + filteredCached.size + onlineResults.size
@@ -845,9 +918,12 @@ fun PlayerCoreScreen() {
                     )
                 }
                 items(filteredLocal) { track ->
+                    val isFav = localFavorites.any { it.id == track.id }
                     TrackItemRow(
                         track = track,
                         onPlay = { viewModel.playLocalTrack(track) },
+                        isFavorite = isFav,
+                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                         onTrackCardClick = {
                             if (playbackState.currentTrack?.id != track.id) {
@@ -873,18 +949,7 @@ fun PlayerCoreScreen() {
                 items(filteredCached) { cached ->
                     CachedTrackRow(
                         cached = cached,
-                        onPlay = {
-                            viewModel.playTrack(
-                                AudioTrack(
-                                    id = cached.id,
-                                    title = cached.title,
-                                    artist = cached.artist,
-                                    audioUrl = cached.localFilePath ?: cached.originalUrl,
-                                    durationMs = cached.durationMs,
-                                    isLocal = cached.localFilePath != null
-                                )
-                            )
-                        },
+                        onPlay = { viewModel.playTrack(cached.toAudioTrack()) },
                         onDelete = { viewModel.removeCachedTrack(cached.id) }
                     )
                 }
@@ -902,9 +967,12 @@ fun PlayerCoreScreen() {
                     )
                 }
                 items(onlineResults) { track ->
+                    val isFav = localFavorites.any { it.id == track.id }
                     TrackItemRow(
                         track = track,
                         onPlay = { playOnlineSafely { viewModel.playTrack(track) } },
+                        isFavorite = isFav,
+                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                         onTrackCardClick = {
                             playOnlineSafely {
@@ -997,6 +1065,7 @@ fun PlayerCoreScreen() {
 
                 items(localTracks) { track ->
                     val isSelected = selectedTracks.contains(track)
+                    val isFav = localFavorites.any { it.id == track.id }
                     TrackItemRow(
                         track = track,
                         onPlay = {
@@ -1008,6 +1077,8 @@ fun PlayerCoreScreen() {
                         },
                         isSelectionMode = isMultiSelectMode,
                         isSelected = isSelected,
+                        isFavorite = isFav,
+                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                         onToggleSelect = {
                             selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
                         },
@@ -1054,15 +1125,7 @@ fun PlayerCoreScreen() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            val track = AudioTrack(
-                                id = histItem.trackId,
-                                title = histItem.title,
-                                artist = histItem.artist,
-                                audioUrl = histItem.audioUrl,
-                                artworkUrl = histItem.artworkUrl,
-                                durationMs = histItem.durationMs
-                            )
-                            viewModel.playTrack(track)
+                            viewModel.playTrack(histItem.toAudioTrack())
                         },
                     shape = RoundedCornerShape(8.dp)
                 ) {
@@ -1084,6 +1147,108 @@ fun PlayerCoreScreen() {
         }
 
 
+
+        // Section: Favorite Tracks (❤️ Улюблені пісні з Room DB)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isFavoritesExpanded = !isFavoritesExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "❤️ Улюблені треки (${localFavorites.size}):",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = if (localFavorites.isNotEmpty()) "Пісні, які ви відзначили сердечком" else "Тут з'являтимуться треки з позначкою ❤️",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (localFavorites.isNotEmpty()) {
+                                Button(
+                                    onClick = {
+                                        val favTracks = localFavorites.map { it.toAudioTrack() }
+                                        viewModel.playQueue(favTracks, 0)
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("▶ Грати всі", fontSize = 11.sp)
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text(text = if (isFavoritesExpanded) "▲" else "▼", fontSize = 12.sp)
+                        }
+                    }
+
+                    if (isFavoritesExpanded && localFavorites.isEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Натисніть ❤️ на будь-якій пісні під час прослуховування або в плеєрі, щоб додати її сюди!",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        if (isFavoritesExpanded && localFavorites.isNotEmpty()) {
+            items(localFavorites) { favItem ->
+                val track = favItem.toAudioTrack()
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.playTrack(track) },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    if (playbackState.currentTrack?.id != track.id) {
+                                        viewModel.playTrack(track)
+                                    }
+                                    showNowPlayingSheet = true
+                                }
+                        ) {
+                            Text(favItem.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(favItem.artist, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(formatDuration(favItem.durationMs), fontSize = 11.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            IconButton(onClick = { tracksToAddToPlaylist = listOf(track) }) {
+                                Text("📁+", fontSize = 14.sp)
+                            }
+                            IconButton(onClick = { viewModel.toggleLocalFavorite(track) }) {
+                                Text("❤️", fontSize = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Section: Local Room Playlists (Офлайн-плейлісти на пристрої)
         item {
@@ -1218,8 +1383,9 @@ fun PlayerCoreScreen() {
                                 color = MaterialTheme.colorScheme.primary
                             )
                             val cacheMb = audioCacheSizeBytes / (1024 * 1024)
+                            val timerStatus = if (isSleepTimerActive) "активний (${sleepTimerRemainingSeconds / 60} хв)" else "вимкнено"
                             Text(
-                                text = "Кеш аудіо: $cacheMb МБ • Сервер: ${serverUrlInput.trimEnd('/')}",
+                                text = "Кеш: $cacheMb МБ • Таймер сну: $timerStatus",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -1235,6 +1401,64 @@ fun PlayerCoreScreen() {
                     }
 
                     if (isServerConfigExpanded) {
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Sleep Timer Setting (prominently at top of settings)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "🌙 Таймер сну (Sleep Timer):",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = if (isSleepTimerActive) {
+                                        val mins = sleepTimerRemainingSeconds / 60
+                                        val secs = sleepTimerRemainingSeconds % 60
+                                        "⏳ Музика зупиниться через: %02d:%02d".format(mins, secs)
+                                    } else {
+                                        "Автоматично зупиняє відтворення через обраний час"
+                                    },
+                                    fontSize = 11.sp,
+                                    color = if (isSleepTimerActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (isSleepTimerActive) {
+                                OutlinedButton(
+                                    onClick = {
+                                        viewModel.cancelSleepTimer()
+                                        Toast.makeText(context, "Таймер сну скасовано", Toast.LENGTH_SHORT).show()
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("Вимкнути", fontSize = 11.sp)
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(15, 30, 45, 60).forEach { mins ->
+                                FilterChip(
+                                    selected = isSleepTimerActive && (sleepTimerRemainingSeconds <= mins * 60L && sleepTimerRemainingSeconds > (mins - 15) * 60L),
+                                    onClick = {
+                                        viewModel.startSleepTimer(mins)
+                                        Toast.makeText(context, "Таймер сну встановлено на $mins хв", Toast.LENGTH_SHORT).show()
+                                    },
+                                    label = { Text("$mins хв", fontSize = 11.sp) }
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        HorizontalDivider()
                         Spacer(modifier = Modifier.height(10.dp))
 
                         // Cache Cleaner Row
@@ -1268,6 +1492,8 @@ fun PlayerCoreScreen() {
                             }
                         }
 
+                        Spacer(modifier = Modifier.height(10.dp))
+                        HorizontalDivider()
                         Spacer(modifier = Modifier.height(10.dp))
 
                         // Server URL Row
@@ -1304,6 +1530,73 @@ fun PlayerCoreScreen() {
         item {
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    if (showSleepTimerDialog) {
+        AlertDialog(
+            onDismissRequest = { showSleepTimerDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("🌙", fontSize = 20.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Таймер сну (Sleep Timer)")
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    if (isSleepTimerActive) {
+                        val mins = sleepTimerRemainingSeconds / 60
+                        val secs = sleepTimerRemainingSeconds % 60
+                        Text(
+                            text = "⏳ Відтворення зупиниться через: %02d:%02d".format(mins, secs),
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = {
+                                viewModel.cancelSleepTimer()
+                                Toast.makeText(context, "Таймер сну вимкнено", Toast.LENGTH_SHORT).show()
+                                showSleepTimerDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("❌ Вимкнути таймер")
+                        }
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Text("Або змінити тривалість:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    } else {
+                        Text("Оберіть час, через який музика автоматично зупиниться:")
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(15, 30, 45, 60).forEach { mins ->
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.startSleepTimer(mins)
+                                    Toast.makeText(context, "Таймер сну встановлено на $mins хв", Toast.LENGTH_SHORT).show()
+                                    showSleepTimerDialog = false
+                                },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp)
+                            ) {
+                                Text("$mins хв", fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSleepTimerDialog = false }) {
+                    Text("Закрити")
+                }
+            }
+        )
     }
 
     if (tracksToAddToPlaylist != null) {
@@ -1589,6 +1882,8 @@ fun TrackItemRow(
     onPlay: () -> Unit,
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
     onToggleSelect: (() -> Unit)? = null,
     onAddToPlaylist: (() -> Unit)? = null,
     onTrackCardClick: (() -> Unit)? = null
@@ -1623,17 +1918,7 @@ fun TrackItemRow(
                 Spacer(modifier = Modifier.width(6.dp))
             }
             Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable {
-                        if (isSelectionMode && onToggleSelect != null) {
-                            onToggleSelect()
-                        } else if (onTrackCardClick != null) {
-                            onTrackCardClick()
-                        } else {
-                            onPlay()
-                        }
-                    }
+                modifier = Modifier.weight(1f)
             ) {
                 Text(
                     text = track.title,
@@ -1650,14 +1935,30 @@ fun TrackItemRow(
                 )
             }
             if (!isSelectionMode) {
+                if (onToggleFavorite != null) {
+                    IconButton(
+                        onClick = onToggleFavorite,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Text(if (isFavorite) "❤️" else "🤍", fontSize = 16.sp)
+                    }
+                }
                 if (onAddToPlaylist != null) {
-                    OutlinedButton(onClick = onAddToPlaylist) {
+                    OutlinedButton(
+                        onClick = onAddToPlaylist,
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
                         Text("📁+", fontSize = 11.sp)
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                 }
-                Button(onClick = onPlay) {
-                    Text("▶")
+                Button(
+                    onClick = onPlay,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text("▶", fontSize = 12.sp)
                 }
             }
         }
@@ -1758,15 +2059,7 @@ fun LocalPlaylistCard(
                                 )
                             }
                             IconButton(onClick = {
-                                val audioTrack = AudioTrack(
-                                    id = trackEntity.trackId,
-                                    title = trackEntity.title,
-                                    artist = trackEntity.artist,
-                                    audioUrl = trackEntity.audioUrl,
-                                    durationMs = trackEntity.durationMs,
-                                    isLocal = trackEntity.isLocal
-                                )
-                                viewModel.playTrack(audioTrack)
+                                viewModel.playTrack(trackEntity.toAudioTrack())
                             }) {
                                 Text("▶", fontSize = 14.sp)
                             }

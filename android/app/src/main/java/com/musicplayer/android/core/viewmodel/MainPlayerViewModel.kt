@@ -11,6 +11,7 @@ import com.musicplayer.android.core.audio.LocalAudioScanner
 import com.musicplayer.android.core.audio.PlaybackState
 import com.musicplayer.android.core.audio.PlayerController
 import com.musicplayer.android.core.audio.PlayerControllerImpl
+import com.musicplayer.android.core.audio.toAudioTrack
 import com.musicplayer.android.core.database.AppDatabase
 import com.musicplayer.android.core.database.CachedTrackEntity
 import com.musicplayer.android.core.database.FavoriteTrackEntity
@@ -34,11 +35,15 @@ import com.musicplayer.android.core.network.RadioStationDto
 import com.musicplayer.android.core.network.RegisterRequestDto
 import com.musicplayer.android.core.session.SessionManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -47,6 +52,7 @@ import kotlinx.coroutines.launch
  * Main ViewModel exposing player state, local tracks, playlists, radio stations,
  * Jamendo/Audius streaming, Room DB caching, and persistent session to the UI layer.
  */
+@OptIn(FlowPreview::class)
 class MainPlayerViewModel(
     application: Application,
     private val playerController: PlayerController = PlayerControllerImpl(application),
@@ -158,6 +164,10 @@ class MainPlayerViewModel(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private var jamendoSearchJob: Job? = null
+    private var audiusSearchJob: Job? = null
+    private var lastPositionSaveTimeMs = 0L
+
     init {
         // Wire automatic 401 Unauthorized handling
         NetworkClient.authInterceptor.onUnauthorizedListener = {
@@ -187,13 +197,15 @@ class MainPlayerViewModel(
         // Restore persisted Equalizer & Bass Boost preferences
         AudioEffectsManager.restorePersistedState(application)
 
-        // Automatic Local Audio Scanning on App Launch & when media is downloaded
+        // Fix #10: Debounce media changes by 1500ms to avoid 30 redundant scans per download
         loadLocalTracks()
         viewModelScope.launch {
             try {
-                localScanner.observeMediaChanges().collect {
-                    loadLocalTracks()
-                }
+                localScanner.observeMediaChanges()
+                    .debounce(1500L)
+                    .collect {
+                        loadLocalTracks()
+                    }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -205,12 +217,18 @@ class MainPlayerViewModel(
             playerController.playbackState.collect { state ->
                 val track = state.currentTrack
                 if (track != null) {
-                    if (state.currentPositionMs > 500L || state.isPlaying) {
+                    // Fix #7: Throttle disk writes to at most once per 5 seconds (not every 500ms)
+                    val now = System.currentTimeMillis()
+                    if ((state.currentPositionMs > 500L || state.isPlaying) &&
+                        now - lastPositionSaveTimeMs >= 5_000L) {
+                        lastPositionSaveTimeMs = now
                         sessionManager.saveLastPlayedTrack(track, state.currentPositionMs)
                     }
+                    // Fix #15: Deduplicate history entries by removing any existing row before insert
                     if (state.isPlaying && track.id != lastRecordedTrackId) {
                         lastRecordedTrackId = track.id
                         try {
+                            db.playHistoryDao().deleteTrackHistory(track.id)
                             db.playHistoryDao().insertHistory(
                                 PlayHistoryEntity(
                                     trackId = track.id,
@@ -219,7 +237,8 @@ class MainPlayerViewModel(
                                     audioUrl = track.audioUrl,
                                     artworkUrl = track.artworkUrl,
                                     durationMs = track.durationMs,
-                                    lastPositionMs = state.currentPositionMs
+                                    lastPositionMs = state.currentPositionMs,
+                                    playedAtTimestamp = System.currentTimeMillis()
                                 )
                             )
                             db.playHistoryDao().trimOldHistory()
@@ -395,18 +414,22 @@ class MainPlayerViewModel(
     }
 
     fun playJamendoTrack(track: JamendoTrackDto) {
+        // Fix #1: Always supply configured baseUrl so Jamendo plays on physical phones
+        val baseUrl = sessionManager.getBaseUrl()
         val allJamendo = _searchedJamendoTracks.value
         if (allJamendo.isNotEmpty()) {
-            val audioTracks = allJamendo.map { AudioTrack.fromJamendo(it) }
+            val audioTracks = allJamendo.map { AudioTrack.fromJamendo(it, baseUrl) }
             val index = allJamendo.indexOfFirst { it.externalId == track.externalId }.coerceAtLeast(0)
             playQueue(audioTracks, index)
         } else {
-            playTrack(AudioTrack.fromJamendo(track))
+            playTrack(AudioTrack.fromJamendo(track, baseUrl))
         }
     }
 
     fun playJamendoQueue(tracks: List<JamendoTrackDto>, startIndex: Int = 0) {
-        val audioTracks = tracks.map { AudioTrack.fromJamendo(it) }
+        // Fix #1: Always supply configured baseUrl
+        val baseUrl = sessionManager.getBaseUrl()
+        val audioTracks = tracks.map { AudioTrack.fromJamendo(it, baseUrl) }
         playQueue(audioTracks, startIndex)
     }
 
@@ -426,8 +449,8 @@ class MainPlayerViewModel(
     }
 
     // Audio Effects & Equalizer Controls
-    fun setEqualizerEnabled(enabled: Boolean) {
-        AudioEffectsManager.setEnabled(enabled, getApplication())
+    fun setEqualizerEnabled(enabled: Boolean): Boolean {
+        return AudioEffectsManager.setEnabled(enabled, getApplication())
     }
 
     fun setEqualizerPreset(presetName: String) {
@@ -528,9 +551,17 @@ class MainPlayerViewModel(
         }
     }
 
+    /**
+     * Fix #25: Debounced Jamendo search (400ms delay) to prevent hammering the network.
+     */
     fun searchJamendo(query: String, limit: Int = 20) {
-        if (query.isBlank()) return
-        viewModelScope.launch {
+        if (query.isBlank()) {
+            _searchedJamendoTracks.value = emptyList()
+            return
+        }
+        jamendoSearchJob?.cancel()
+        jamendoSearchJob = viewModelScope.launch {
+            delay(400L)
             _isLoading.value = true
             try {
                 val resp = apiService.searchJamendoTracks(query.trim(), limit)
@@ -547,9 +578,17 @@ class MainPlayerViewModel(
         }
     }
 
+    /**
+     * Fix #25: Debounced Audius search (400ms delay).
+     */
     fun searchAudius(query: String, limit: Int = 20) {
-        if (query.isBlank()) return
-        viewModelScope.launch {
+        if (query.isBlank()) {
+            _searchedAudiusTracks.value = emptyList()
+            return
+        }
+        audiusSearchJob?.cancel()
+        audiusSearchJob = viewModelScope.launch {
+            delay(400L)
             try {
                 val resp = apiService.searchAudiusTracks(query.trim(), limit)
                 if (resp.isSuccessful) {
@@ -675,6 +714,7 @@ class MainPlayerViewModel(
     fun deleteLocalPlaylist(playlistId: Long) {
         viewModelScope.launch {
             try {
+                // Fix #30: ForeignKey CASCADE deletes playlist tracks automatically
                 db.localPlaylistDao().deletePlaylist(playlistId)
                 db.localPlaylistDao().deleteTracksForPlaylist(playlistId)
             } catch (e: Exception) {
@@ -698,6 +738,7 @@ class MainPlayerViewModel(
                         title = track.title,
                         artist = track.artist,
                         audioUrl = track.audioUrl,
+                        artworkUrl = track.artworkUrl, // Fix #14: preserve artwork
                         durationMs = track.durationMs,
                         isLocal = track.isLocal
                     )
@@ -723,6 +764,7 @@ class MainPlayerViewModel(
                             title = track.title,
                             artist = track.artist,
                             audioUrl = track.audioUrl,
+                            artworkUrl = track.artworkUrl, // Fix #14: preserve artwork
                             durationMs = track.durationMs,
                             isLocal = track.isLocal
                         )
@@ -749,16 +791,7 @@ class MainPlayerViewModel(
     fun playLocalPlaylist(playlistId: Long, startIndex: Int = 0) {
         viewModelScope.launch {
             try {
-                val tracks = db.localPlaylistDao().getTracksForPlaylistSync(playlistId).map {
-                    AudioTrack(
-                        id = it.trackId,
-                        title = it.title,
-                        artist = it.artist,
-                        audioUrl = it.audioUrl,
-                        durationMs = it.durationMs,
-                        isLocal = it.isLocal
-                    )
-                }
+                val tracks = db.localPlaylistDao().getTracksForPlaylistSync(playlistId).map { it.toAudioTrack() }
                 if (tracks.isNotEmpty()) {
                     playerController.setQueue(tracks, startIndex)
                 }
@@ -896,6 +929,7 @@ class MainPlayerViewModel(
                         artist = track.artist,
                         localFilePath = null,
                         originalUrl = track.audioUrl,
+                        artworkUrl = track.artworkUrl, // Fix #14: save artworkUrl
                         durationMs = track.durationMs,
                         cachedAtTimestamp = System.currentTimeMillis()
                     )
@@ -975,6 +1009,8 @@ class MainPlayerViewModel(
     override fun onCleared() {
         super.onCleared()
         playerController.release()
+        // Fix #20: Cancel SleepTimer when ViewModel is cleared
+        com.musicplayer.android.core.audio.SleepTimer.cancel()
     }
 
     companion object {

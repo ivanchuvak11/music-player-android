@@ -3,6 +3,10 @@ package com.musicplayer.android.core.audio
 import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import com.musicplayer.android.core.database.CachedTrackEntity
+import com.musicplayer.android.core.database.FavoriteTrackEntity
+import com.musicplayer.android.core.database.LocalPlaylistTrackEntity
+import com.musicplayer.android.core.database.PlayHistoryEntity
 import com.musicplayer.android.core.network.AudiusTrackDto
 import com.musicplayer.android.core.network.JamendoTrackDto
 import com.musicplayer.android.core.network.RadioStationDto
@@ -121,6 +125,53 @@ data class AudioTrack(
         }
     }
 }
+
+/**
+ * Extension functions converting database entities directly to AudioTrack (Fix #23: Code Duplication elimination).
+ */
+fun FavoriteTrackEntity.toAudioTrack(): AudioTrack = AudioTrack(
+    id = id,
+    title = title,
+    artist = artist,
+    audioUrl = audioUrl,
+    artworkUrl = artworkUrl,
+    durationMs = durationMs,
+    isLocal = audioUrl.startsWith("content://") || audioUrl.startsWith("file://"),
+    isLiveStream = audioUrl.contains("radio")
+)
+
+fun PlayHistoryEntity.toAudioTrack(): AudioTrack = AudioTrack(
+    id = trackId,
+    title = title,
+    artist = artist,
+    audioUrl = audioUrl,
+    artworkUrl = artworkUrl,
+    durationMs = durationMs,
+    isLocal = audioUrl.startsWith("content://") || audioUrl.startsWith("file://"),
+    isLiveStream = audioUrl.contains("radio")
+)
+
+fun LocalPlaylistTrackEntity.toAudioTrack(): AudioTrack = AudioTrack(
+    id = trackId,
+    title = title,
+    artist = artist,
+    audioUrl = audioUrl,
+    artworkUrl = artworkUrl,
+    durationMs = durationMs,
+    isLocal = isLocal,
+    isLiveStream = audioUrl.contains("radio")
+)
+
+fun CachedTrackEntity.toAudioTrack(): AudioTrack = AudioTrack(
+    id = id,
+    title = title,
+    artist = artist,
+    audioUrl = localFilePath ?: originalUrl,
+    artworkUrl = artworkUrl,
+    durationMs = durationMs,
+    isLocal = localFilePath != null,
+    isLiveStream = false
+)
 
 /**
  * Current playback state observed by UI components.

@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.database.ContentObserver
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
@@ -56,7 +57,8 @@ class LocalAudioScanner(private val context: Context) {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.ALBUM_ID,
-            MediaStore.Audio.Media.DATA
+            MediaStore.Audio.Media.DATA,
+            MediaStore.Audio.Media.DISPLAY_NAME
         )
 
         // Broader selection to catch downloaded tracks that might not have IS_MUSIC set immediately
@@ -78,36 +80,39 @@ class LocalAudioScanner(private val context: Context) {
                 val durationColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DURATION)
                 val albumIdColumn = cursor.getColumnIndex(MediaStore.Audio.Media.ALBUM_ID)
                 val dataColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+                val nameColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DISPLAY_NAME)
 
                 val artworkUriBase = Uri.parse("content://media/external/audio/albumart")
 
                 while (cursor.moveToNext()) {
                     val filePath = if (dataColumn != -1) cursor.getString(dataColumn)?.lowercase().orEmpty() else ""
+                    val displayName = if (nameColumn != -1) cursor.getString(nameColumn)?.lowercase().orEmpty() else ""
+                    val checkString = filePath.ifBlank { displayName }
 
                     // Ignore voice messages of any length from messengers or voice recorders
-                    val isMessengerOrVoiceNote = filePath.contains("telegram") ||
-                        filePath.contains("whatsapp") ||
-                        filePath.contains("viber") ||
-                        filePath.contains("voice") ||
-                        filePath.contains("record") ||
-                        filePath.contains("notifications") ||
-                        filePath.contains("ringtones") ||
-                        filePath.contains("alarms")
+                    val isMessengerOrVoiceNote = checkString.contains("telegram") ||
+                        checkString.contains("whatsapp") ||
+                        checkString.contains("viber") ||
+                        checkString.contains("voice") ||
+                        checkString.contains("record") ||
+                        checkString.contains("notifications") ||
+                        checkString.contains("ringtones") ||
+                        checkString.contains("alarms")
 
                     if (isMessengerOrVoiceNote) {
                         continue
                     }
 
                     // Check valid audio extensions
-                    val isAudioExtension = filePath.endsWith(".mp3") ||
-                        filePath.endsWith(".m4a") ||
-                        filePath.endsWith(".aac") ||
-                        filePath.endsWith(".flac") ||
-                        filePath.endsWith(".wav") ||
-                        filePath.endsWith(".ogg") ||
-                        filePath.endsWith(".opus") ||
-                        filePath.endsWith(".wma") ||
-                        filePath.isBlank() // If dataColumn isn't provided by Android 11+ scoped storage, pass through
+                    val isAudioExtension = checkString.endsWith(".mp3") ||
+                        checkString.endsWith(".m4a") ||
+                        checkString.endsWith(".aac") ||
+                        checkString.endsWith(".flac") ||
+                        checkString.endsWith(".wav") ||
+                        checkString.endsWith(".ogg") ||
+                        checkString.endsWith(".opus") ||
+                        checkString.endsWith(".wma") ||
+                        checkString.isBlank() // If neither DATA nor DISPLAY_NAME is readable, pass through
 
                     if (!isAudioExtension) {
                         continue
@@ -123,9 +128,13 @@ class LocalAudioScanner(private val context: Context) {
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                         id
                     )
+
+                    // Fix #9: Scoped storage compliant album art fallback (supports both album art URI and direct contentUri for ID3 extractor)
                     val albumArtUri = if (albumId > 0) {
                         ContentUris.withAppendedId(artworkUriBase, albumId)
                     } else null
+
+                    val resolvedArtworkUrl = albumArtUri?.toString() ?: contentUri.toString()
 
                     tracks.add(
                         AudioTrack(
@@ -133,7 +142,7 @@ class LocalAudioScanner(private val context: Context) {
                             title = title,
                             artist = artist,
                             audioUrl = contentUri.toString(),
-                            artworkUrl = albumArtUri?.toString(),
+                            artworkUrl = resolvedArtworkUrl,
                             durationMs = duration,
                             isLocal = true,
                             isLiveStream = false
