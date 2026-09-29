@@ -100,6 +100,7 @@ fun PlayerCoreScreen() {
     var newPlaylistName by remember { mutableStateOf("") }
     var showNowPlayingSheet by remember { mutableStateOf(false) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
+    var isFavoritesExpanded by remember { mutableStateOf(true) }
 
     LaunchedEffect(playbackState.currentTrack) {
         val track = playbackState.currentTrack
@@ -919,9 +920,12 @@ fun PlayerCoreScreen() {
                     )
                 }
                 items(filteredLocal) { track ->
+                    val isFav = localFavorites.any { it.id == track.id }
                     TrackItemRow(
                         track = track,
                         onPlay = { viewModel.playLocalTrack(track) },
+                        isFavorite = isFav,
+                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                         onTrackCardClick = {
                             if (playbackState.currentTrack?.id != track.id) {
@@ -976,9 +980,12 @@ fun PlayerCoreScreen() {
                     )
                 }
                 items(onlineResults) { track ->
+                    val isFav = localFavorites.any { it.id == track.id }
                     TrackItemRow(
                         track = track,
                         onPlay = { playOnlineSafely { viewModel.playTrack(track) } },
+                        isFavorite = isFav,
+                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                         onTrackCardClick = {
                             playOnlineSafely {
@@ -1071,6 +1078,7 @@ fun PlayerCoreScreen() {
 
                 items(localTracks) { track ->
                     val isSelected = selectedTracks.contains(track)
+                    val isFav = localFavorites.any { it.id == track.id }
                     TrackItemRow(
                         track = track,
                         onPlay = {
@@ -1082,6 +1090,8 @@ fun PlayerCoreScreen() {
                         },
                         isSelectionMode = isMultiSelectMode,
                         isSelected = isSelected,
+                        isFavorite = isFav,
+                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                         onToggleSelect = {
                             selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
                         },
@@ -1158,6 +1168,124 @@ fun PlayerCoreScreen() {
         }
 
 
+
+        // Section: Favorite Tracks (❤️ Улюблені пісні з Room DB)
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isFavoritesExpanded = !isFavoritesExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "❤️ Улюблені треки (${localFavorites.size}):",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = if (localFavorites.isNotEmpty()) "Пісні, які ви відзначили сердечком" else "Тут з'являтимуться треки з позначкою ❤️",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (localFavorites.isNotEmpty()) {
+                                Button(
+                                    onClick = {
+                                        val favTracks = localFavorites.map { fav ->
+                                            AudioTrack(
+                                                id = fav.id,
+                                                title = fav.title,
+                                                artist = fav.artist,
+                                                audioUrl = fav.audioUrl,
+                                                artworkUrl = fav.artworkUrl,
+                                                durationMs = fav.durationMs
+                                            )
+                                        }
+                                        viewModel.playQueue(favTracks, 0)
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Text("▶ Грати всі", fontSize = 11.sp)
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                            }
+                            Text(text = if (isFavoritesExpanded) "▲" else "▼", fontSize = 12.sp)
+                        }
+                    }
+
+                    if (isFavoritesExpanded && localFavorites.isEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Натисніть ❤️ на будь-якій пісні під час прослуховування або в плеєрі, щоб додати її сюди!",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        if (isFavoritesExpanded && localFavorites.isNotEmpty()) {
+            items(localFavorites) { favItem ->
+                val track = AudioTrack(
+                    id = favItem.id,
+                    title = favItem.title,
+                    artist = favItem.artist,
+                    audioUrl = favItem.audioUrl,
+                    artworkUrl = favItem.artworkUrl,
+                    durationMs = favItem.durationMs
+                )
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { viewModel.playTrack(track) },
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    if (playbackState.currentTrack?.id != track.id) {
+                                        viewModel.playTrack(track)
+                                    }
+                                    showNowPlayingSheet = true
+                                }
+                        ) {
+                            Text(favItem.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(favItem.artist, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(formatDuration(favItem.durationMs), fontSize = 11.sp)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            IconButton(onClick = { tracksToAddToPlaylist = listOf(track) }) {
+                                Text("📁+", fontSize = 14.sp)
+                            }
+                            IconButton(onClick = { viewModel.toggleLocalFavorite(track) }) {
+                                Text("❤️", fontSize = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Section: Local Room Playlists (Офлайн-плейлісти на пристрої)
         item {
@@ -1791,6 +1919,8 @@ fun TrackItemRow(
     onPlay: () -> Unit,
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
     onToggleSelect: (() -> Unit)? = null,
     onAddToPlaylist: (() -> Unit)? = null,
     onTrackCardClick: (() -> Unit)? = null
@@ -1852,14 +1982,30 @@ fun TrackItemRow(
                 )
             }
             if (!isSelectionMode) {
+                if (onToggleFavorite != null) {
+                    IconButton(
+                        onClick = onToggleFavorite,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Text(if (isFavorite) "❤️" else "🤍", fontSize = 16.sp)
+                    }
+                }
                 if (onAddToPlaylist != null) {
-                    OutlinedButton(onClick = onAddToPlaylist) {
+                    OutlinedButton(
+                        onClick = onAddToPlaylist,
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
                         Text("📁+", fontSize = 11.sp)
                     }
-                    Spacer(modifier = Modifier.width(6.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                 }
-                Button(onClick = onPlay) {
-                    Text("▶")
+                Button(
+                    onClick = onPlay,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text("▶", fontSize = 12.sp)
                 }
             }
         }
