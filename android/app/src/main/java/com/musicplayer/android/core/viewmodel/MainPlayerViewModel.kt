@@ -14,6 +14,8 @@ import com.musicplayer.android.core.audio.PlayerControllerImpl
 import com.musicplayer.android.core.database.AppDatabase
 import com.musicplayer.android.core.database.CachedTrackEntity
 import com.musicplayer.android.core.database.FavoriteTrackEntity
+import com.musicplayer.android.core.database.LocalPlaylistEntity
+import com.musicplayer.android.core.database.LocalPlaylistTrackEntity
 import com.musicplayer.android.core.database.PlayHistoryEntity
 import com.musicplayer.android.core.network.AddFavoriteRadioRequestDto
 import com.musicplayer.android.core.network.AddFavoriteTrackRequestDto
@@ -32,6 +34,7 @@ import com.musicplayer.android.core.network.RadioStationDto
 import com.musicplayer.android.core.network.RegisterRequestDto
 import com.musicplayer.android.core.session.SessionManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -83,7 +86,7 @@ class MainPlayerViewModel(
     private val _radioStations = MutableStateFlow<List<RadioStationDto>>(emptyList())
     val radioStations: StateFlow<List<RadioStationDto>> = _radioStations.asStateFlow()
 
-    private val _radioStationsByCountry = MutableStateFlow<List<RadioStationDto>>(emptyList())
+    private val _radioStationsByCountry = MutableStateFlow<List<RadioStationDto>>(DEFAULT_UA_RADIO_STATIONS)
     val radioStationsByCountry: StateFlow<List<RadioStationDto>> = _radioStationsByCountry.asStateFlow()
 
     // Jamendo tracks
@@ -100,6 +103,11 @@ class MainPlayerViewModel(
     // Playlists from backend
     private val _playlists = MutableStateFlow<List<PlaylistSummaryDto>>(emptyList())
     val playlists: StateFlow<List<PlaylistSummaryDto>> = _playlists.asStateFlow()
+
+    // Local Room DB Playlists (100% offline & persistent)
+    val localPlaylists: StateFlow<List<LocalPlaylistEntity>> = db.localPlaylistDao()
+        .getAllPlaylists()
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     // Favorite tracks from backend
     private val _favoriteTracks = MutableStateFlow<List<FavoriteTrackDto>>(emptyList())
@@ -197,8 +205,8 @@ class MainPlayerViewModel(
             playerController.playbackState.collect { state ->
                 val track = state.currentTrack
                 if (track != null) {
-                    if (state.currentPositionMs > 1000L) {
-                        sessionManager.saveLastPlaybackPosition(track.id, state.currentPositionMs)
+                    if (state.currentPositionMs > 500L || state.isPlaying) {
+                        sessionManager.saveLastPlayedTrack(track, state.currentPositionMs)
                     }
                     if (state.isPlaying && track.id != lastRecordedTrackId) {
                         lastRecordedTrackId = track.id
@@ -256,7 +264,32 @@ class MainPlayerViewModel(
     }
 
     // Player Actions
-    fun play() = playerController.play()
+    fun play() {
+        if (playbackState.value.currentTrack != null) {
+            playerController.play()
+        } else {
+            // Memory: Resume track and position that was playing before app was closed!
+            val lastPlayed = sessionManager.getLastPlayedTrack()
+            if (lastPlayed != null) {
+                val (track, pos) = lastPlayed
+                playerController.playTrack(track)
+                if (pos > 1000L && !track.isLiveStream) {
+                    playerController.seekTo(pos)
+                }
+            } else {
+                // If nothing in memory, start playing the first local song!
+                val firstTrack = _localTracks.value.firstOrNull()
+                if (firstTrack != null) {
+                    playLocalTrack(firstTrack)
+                } else {
+                    playerController.play()
+                }
+            }
+        }
+    }
+
+    fun getLastPlayedTrack(): Pair<AudioTrack, Long>? = sessionManager.getLastPlayedTrack()
+
     fun pause() = playerController.pause()
     fun playNext() = playerController.playNext()
     fun playPrevious() = playerController.playPrevious()
@@ -498,11 +531,11 @@ class MainPlayerViewModel(
         viewModelScope.launch {
             try {
                 val resp = apiService.getRadioStationsByCountry(countryCode, limit)
-                if (resp.isSuccessful) {
-                    _radioStationsByCountry.value = resp.body().orEmpty()
+                if (resp.isSuccessful && !resp.body().isNullOrEmpty()) {
+                    _radioStationsByCountry.value = resp.body()!!
                 }
             } catch (e: Exception) {
-                e.printStackTrace()
+                // Keep default stations on network/backend failure
             }
         }
     }
@@ -590,13 +623,77 @@ class MainPlayerViewModel(
         }
     }
 
-    fun createPlaylist(name: String) {
+    fun getPlaylistTracks(playlistId: Long): Flow<List<LocalPlaylistTrackEntity>> {
+        return db.localPlaylistDao().getTracksForPlaylist(playlistId)
+    }
+
+    fun createLocalPlaylist(name: String) {
         if (name.isBlank()) return
         viewModelScope.launch {
             try {
-                val resp = apiService.createPlaylist(CreatePlaylistRequestDto(name = name.trim()))
-                if (resp.isSuccessful) {
-                    loadPlaylists()
+                db.localPlaylistDao().insertPlaylist(LocalPlaylistEntity(name = name.trim()))
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun deleteLocalPlaylist(playlistId: Long) {
+        viewModelScope.launch {
+            try {
+                db.localPlaylistDao().deletePlaylist(playlistId)
+                db.localPlaylistDao().deleteTracksForPlaylist(playlistId)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun addTrackToLocalPlaylist(playlistId: Long, track: AudioTrack) {
+        viewModelScope.launch {
+            try {
+                db.localPlaylistDao().insertTrack(
+                    LocalPlaylistTrackEntity(
+                        playlistId = playlistId,
+                        trackId = track.id,
+                        title = track.title,
+                        artist = track.artist,
+                        audioUrl = track.audioUrl,
+                        durationMs = track.durationMs,
+                        isLocal = track.isLocal
+                    )
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun removeTrackFromLocalPlaylist(playlistId: Long, trackId: String) {
+        viewModelScope.launch {
+            try {
+                db.localPlaylistDao().removeTrackFromPlaylist(playlistId, trackId)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun playLocalPlaylist(playlistId: Long, startIndex: Int = 0) {
+        viewModelScope.launch {
+            try {
+                val tracks = db.localPlaylistDao().getTracksForPlaylistSync(playlistId).map {
+                    AudioTrack(
+                        id = it.trackId,
+                        title = it.title,
+                        artist = it.artist,
+                        audioUrl = it.audioUrl,
+                        durationMs = it.durationMs,
+                        isLocal = it.isLocal
+                    )
+                }
+                if (tracks.isNotEmpty()) {
+                    playerController.setQueue(tracks, startIndex)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -604,7 +701,25 @@ class MainPlayerViewModel(
         }
     }
 
+    fun createPlaylist(name: String) {
+        if (name.isBlank()) return
+        createLocalPlaylist(name)
+        if (sessionManager.isLoggedIn()) {
+            viewModelScope.launch {
+                try {
+                    val resp = apiService.createPlaylist(CreatePlaylistRequestDto(name = name.trim()))
+                    if (resp.isSuccessful) {
+                        loadPlaylists()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
     fun deletePlaylist(playlistId: Int) {
+        deleteLocalPlaylist(playlistId.toLong())
         viewModelScope.launch {
             try {
                 val resp = apiService.deletePlaylist(playlistId)
@@ -793,5 +908,82 @@ class MainPlayerViewModel(
     override fun onCleared() {
         super.onCleared()
         playerController.release()
+    }
+
+    companion object {
+        val DEFAULT_UA_RADIO_STATIONS = listOf(
+            RadioStationDto(
+                stationId = "hitfm_ua",
+                name = "Хіт FM",
+                streamUrl = "https://online.hitfm.ua/HitFM_HD",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Хіти / Поп",
+                codec = "MP3/AAC"
+            ),
+            RadioStationDto(
+                stationId = "kissfm_ua",
+                name = "Kiss FM Ukraine",
+                streamUrl = "https://online.kissfm.ua/KissFM_HD",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Dance / EDM",
+                codec = "MP3/AAC"
+            ),
+            RadioStationDto(
+                stationId = "radioroks_ua",
+                name = "Radio ROKS",
+                streamUrl = "https://online.radioroks.ua/RadioROKS_HD",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Рок-класика",
+                codec = "MP3/AAC"
+            ),
+            RadioStationDto(
+                stationId = "bayraktar_ua",
+                name = "Радіо Байрактар",
+                streamUrl = "https://online.radiobayraktar.ua/RadioBayraktar_HD",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Українська музика",
+                codec = "MP3/AAC"
+            ),
+            RadioStationDto(
+                stationId = "radiorelax_ua",
+                name = "Radio Relax",
+                streamUrl = "https://online.radiorelax.ua/RadioRelax_HD",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Легка музика / Chill",
+                codec = "MP3/AAC"
+            ),
+            RadioStationDto(
+                stationId = "radiojazz_ua",
+                name = "Radio Jazz",
+                streamUrl = "https://online.radiojazz.ua/RadioJazz_HD",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Джаз та Блюз",
+                codec = "MP3/AAC"
+            ),
+            RadioStationDto(
+                stationId = "melodiafm_ua",
+                name = "Мелодія FM",
+                streamUrl = "https://online.melodiafm.ua/MelodiaFM_HD",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Ретро та Хіти",
+                codec = "MP3/AAC"
+            ),
+            RadioStationDto(
+                stationId = "nasheradio_ua",
+                name = "Наше Радіо",
+                streamUrl = "https://online.nasheradio.ua/NasheRadio_HD",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Український Поп",
+                codec = "MP3/AAC"
+            )
+        )
     }
 }

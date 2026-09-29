@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +29,8 @@ import com.musicplayer.android.core.audio.AudioEffectsState
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.PlaybackState
 import com.musicplayer.android.core.database.CachedTrackEntity
+import com.musicplayer.android.core.database.LocalPlaylistEntity
+import com.musicplayer.android.core.database.LocalPlaylistTrackEntity
 import com.musicplayer.android.core.network.RadioStationDto
 import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 
@@ -66,9 +69,7 @@ fun PlayerCoreScreen() {
     val trendingAudius by viewModel.trendingAudiusTracks.collectAsState()
     val searchedAudius by viewModel.searchedAudiusTracks.collectAsState()
     val searchedJamendo by viewModel.searchedJamendoTracks.collectAsState()
-    val radioStations by viewModel.radioStations.collectAsState()
     val radioStationsByCountry by viewModel.radioStationsByCountry.collectAsState()
-    val playlists by viewModel.playlists.collectAsState()
     val cachedTracks by viewModel.searchedCachedTracks.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val authStatus by viewModel.authStatusMessage.collectAsState()
@@ -77,17 +78,18 @@ fun PlayerCoreScreen() {
     val audioEffectsState by viewModel.audioEffectsState.collectAsState()
     val localFavorites by viewModel.localFavorites.collectAsState()
     val playHistory by viewModel.playHistory.collectAsState()
+    val localPlaylists by viewModel.localPlaylists.collectAsState()
 
+    var trackToAddToPlaylist by remember { mutableStateOf<AudioTrack?>(null) }
+    var expandedPlaylistId by remember { mutableStateOf<Long?>(null) }
+    var currentRadioIndex by remember { mutableStateOf(0) }
     var audioCacheSizeBytes by remember { mutableStateOf(viewModel.getAudioCacheSizeBytes()) }
     var serverUrlInput by remember { mutableStateOf(viewModel.getBaseUrl()) }
     var isServerConfigExpanded by remember { mutableStateOf(false) }
     var isEqualizerExpanded by remember { mutableStateOf(false) }
-    var cachedFilterQuery by remember { mutableStateOf("") }
-    var localSearchQuery by remember { mutableStateOf("") }
+    var unifiedSearchQuery by remember { mutableStateOf("") }
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
-    var searchQuery by remember { mutableStateOf("") }
-    var jamendoQuery by remember { mutableStateOf("") }
     var newPlaylistName by remember { mutableStateOf("") }
 
     // Permission launcher for scanning local audio
@@ -275,7 +277,13 @@ fun PlayerCoreScreen() {
         }
 
         // Active Player Card with Seek Bar
+        // Active Player Card with Seek Bar & Memory Resume
         item {
+            val lastSession = remember { viewModel.getLastPlayedTrack() }
+            val rememberedTrack = lastSession?.first
+            val rememberedPosition = lastSession?.second ?: 0L
+            val currentOrRememberedTrack = playbackState.currentTrack ?: rememberedTrack
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
@@ -289,27 +297,27 @@ fun PlayerCoreScreen() {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Зараз грає:",
+                                text = if (playbackState.isPlaying) "Зараз грає:" else if (playbackState.currentTrack != null) "На паузі:" else "Остання пісня:",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = playbackState.currentTrack?.title ?: "Трек не вибрано",
+                                text = currentOrRememberedTrack?.title ?: "Трек не вибрано",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = playbackState.currentTrack?.artist ?: "Оберіть пісню зі списку нижче",
+                                text = currentOrRememberedTrack?.artist ?: "Натисніть «▶ Грати» щоб почати",
                                 fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        playbackState.currentTrack?.let { track ->
+                        currentOrRememberedTrack?.let { track ->
                             val isFav = localFavorites.any { it.id == track.id }
                             IconButton(onClick = { viewModel.toggleLocalFavorite(track) }) {
                                 Text(if (isFav) "❤️" else "🤍", fontSize = 22.sp)
@@ -321,12 +329,20 @@ fun PlayerCoreScreen() {
 
                     // Interactive Seek Slider with smooth preview to avoid audio stuttering
                     var userSeekingPosition by remember { mutableStateOf<Float?>(null) }
-                    val currentPos = userSeekingPosition ?: playbackState.currentPositionMs.toFloat()
+                    val totalDuration = if (playbackState.durationMs > 0L) {
+                        playbackState.durationMs
+                    } else {
+                        currentOrRememberedTrack?.durationMs ?: 0L
+                    }
+                    val currentPos = userSeekingPosition ?: (
+                        if (playbackState.currentTrack != null) playbackState.currentPositionMs.toFloat()
+                        else rememberedPosition.toFloat()
+                    )
 
-                    if (playbackState.durationMs > 0L) {
+                    if (totalDuration > 0L) {
                         Slider(
-                            value = currentPos.coerceIn(0f, playbackState.durationMs.toFloat()),
-                            valueRange = 0f..playbackState.durationMs.toFloat(),
+                            value = currentPos.coerceIn(0f, totalDuration.toFloat()),
+                            valueRange = 0f..totalDuration.toFloat(),
                             onValueChange = { newPos ->
                                 userSeekingPosition = newPos
                             },
@@ -351,14 +367,18 @@ fun PlayerCoreScreen() {
                                 playbackState.isBuffering -> "⏳ Буферизація..."
                                 playbackState.isPlaying -> "▶ Відтворення"
                                 playbackState.currentTrack != null -> "⏸ На паузі"
+                                rememberedTrack != null -> "⏸ Готово до відтворення"
                                 else -> "⏹ Зупинено"
                             },
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
-                        val displayedPos = userSeekingPosition?.toLong() ?: playbackState.currentPositionMs
+                        val displayedPos = userSeekingPosition?.toLong() ?: (
+                            if (playbackState.currentTrack != null) playbackState.currentPositionMs
+                            else rememberedPosition
+                        )
                         Text(
-                            text = "${formatDuration(displayedPos)} / ${formatDuration(playbackState.durationMs)}",
+                            text = "${formatDuration(displayedPos)} / ${formatDuration(totalDuration)}",
                             fontSize = 12.sp
                         )
                     }
@@ -638,7 +658,140 @@ fun PlayerCoreScreen() {
             }
         }
 
-        // Quick Audio Engine Test Streams
+        // 📻 Compact Live Radio Bar with Station Switcher
+        item {
+            val stations = radioStationsByCountry.ifEmpty { MainPlayerViewModel.DEFAULT_UA_RADIO_STATIONS }
+            val safeIndex = currentRadioIndex.coerceIn(0, (stations.size - 1).coerceAtLeast(0))
+            val currentStation = stations.getOrNull(safeIndex)
+
+            val isCurrentStationPlaying = currentStation != null &&
+                playbackState.currentTrack?.title == currentStation.name &&
+                playbackState.isPlaying
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "📻 Онлайн-радіо",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            AssistChip(
+                                onClick = {},
+                                label = { Text("LIVE 🟢", fontSize = 9.sp) },
+                                modifier = Modifier.height(24.dp)
+                            )
+                        }
+                        if (stations.isNotEmpty()) {
+                            Text(
+                                text = "${safeIndex + 1}/${stations.size}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (currentStation != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            // Prev station button
+                            OutlinedButton(
+                                onClick = {
+                                    val newIdx = if (safeIndex > 0) safeIndex - 1 else stations.size - 1
+                                    currentRadioIndex = newIdx
+                                    val newStation = stations[newIdx]
+                                    if (playbackState.isPlaying && playbackState.currentTrack?.isLiveStream == true) {
+                                        playOnlineSafely { viewModel.playRadioStation(newStation) }
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.width(44.dp)
+                            ) {
+                                Text("⏮")
+                            }
+
+                            // Station info (clickable to play)
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        if (isCurrentStationPlaying) {
+                                            viewModel.pause()
+                                        } else {
+                                            playOnlineSafely { viewModel.playRadioStation(currentStation) }
+                                        }
+                                    }
+                            ) {
+                                Text(
+                                    text = currentStation.name,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${currentStation.genre ?: "Online Radio"} • ${currentStation.codec ?: "MP3"}",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            // Play / Pause button
+                            Button(
+                                onClick = {
+                                    if (isCurrentStationPlaying) {
+                                        viewModel.pause()
+                                    } else if (playbackState.currentTrack?.title == currentStation.name) {
+                                        viewModel.play()
+                                    } else {
+                                        playOnlineSafely { viewModel.playRadioStation(currentStation) }
+                                    }
+                                }
+                            ) {
+                                Text(if (isCurrentStationPlaying) "⏸" else "▶")
+                            }
+
+                            // Next station button
+                            OutlinedButton(
+                                onClick = {
+                                    val newIdx = (safeIndex + 1) % stations.size
+                                    currentRadioIndex = newIdx
+                                    val newStation = stations[newIdx]
+                                    if (playbackState.isPlaying && playbackState.currentTrack?.isLiveStream == true) {
+                                        playOnlineSafely { viewModel.playRadioStation(newStation) }
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp),
+                                modifier = Modifier.width(44.dp)
+                            ) {
+                                Text("⏭")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 🔍 Unified Global Search Bar
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -646,82 +799,29 @@ fun PlayerCoreScreen() {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "⚡ Прямий тест звуку (радіо та mp3):",
+                        text = "🔍 Швидкий пошук:",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                val testRadio = AudioTrack(
-                                    id = "test_radio_1",
-                                    title = "Hit Radio Live",
-                                    artist = "Internet Radio Stream",
-                                    audioUrl = "https://stream.zeno.fm/f3wvbbqmdg8uv",
-                                    durationMs = 0L,
-                                    isLocal = false,
-                                    isLiveStream = true
-                                )
-                                viewModel.playTrack(testRadio)
-                            }
-                        ) {
-                            Text("📻 Онлайн Радіо")
-                        }
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                val testSong = AudioTrack(
-                                    id = "test_song_1",
-                                    title = "SoundHelix Song 1",
-                                    artist = "SoundHelix (MP3 Stream)",
-                                    audioUrl = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-                                    durationMs = 372000L,
-                                    isLocal = false,
-                                    isLiveStream = false
-                                )
-                                viewModel.playTrack(testSong)
-                            }
-                        ) {
-                            Text("🎵 Тестовий MP3")
-                        }
-                    }
-                }
-            }
-        }
-
-        // List of found local tracks with instant live search
-        if (localTracks.isNotEmpty()) {
-            val filteredLocalTracks = if (localSearchQuery.isBlank()) {
-                localTracks
-            } else {
-                localTracks.filter {
-                    it.title.contains(localSearchQuery.trim(), ignoreCase = true) ||
-                    it.artist.contains(localSearchQuery.trim(), ignoreCase = true)
-                }
-            }
-
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "📱 Музика на пристрої (${filteredLocalTracks.size}${if (localSearchQuery.isNotBlank()) " із ${localTracks.size}" else ""}):",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
                     OutlinedTextField(
-                        value = localSearchQuery,
-                        onValueChange = { localSearchQuery = it },
-                        placeholder = { Text("🔍 Пошук серед локальних пісень...") },
+                        value = unifiedSearchQuery,
+                        onValueChange = {
+                            unifiedSearchQuery = it
+                            if (it.isNotBlank() && isOnline) {
+                                viewModel.searchJamendo(it.trim())
+                                viewModel.searchAudius(it.trim())
+                            }
+                        },
+                        placeholder = { Text("Введіть пісню або артиста...") },
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
+                        leadingIcon = {
+                            Text("🔍", fontSize = 16.sp)
+                        },
                         trailingIcon = {
-                            if (localSearchQuery.isNotEmpty()) {
-                                IconButton(onClick = { localSearchQuery = "" }) {
+                            if (unifiedSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { unifiedSearchQuery = "" }) {
                                     Text("✕", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
@@ -729,27 +829,129 @@ fun PlayerCoreScreen() {
                     )
                 }
             }
+        }
 
-            if (filteredLocalTracks.isEmpty()) {
+        // Unified Search Results or Default Local Library
+        if (unifiedSearchQuery.isNotBlank()) {
+            val q = unifiedSearchQuery.trim()
+            val filteredLocal = localTracks.filter {
+                it.title.contains(q, ignoreCase = true) || it.artist.contains(q, ignoreCase = true)
+            }
+            val filteredCached = cachedTracks.filter {
+                it.title.contains(q, ignoreCase = true) || it.artist.contains(q, ignoreCase = true)
+            }
+            val onlineResults = searchedJamendo.map { AudioTrack.fromJamendo(it) } +
+                searchedAudius.map { AudioTrack.fromAudius(it, viewModel.getBaseUrl()) }
+
+            val totalFound = filteredLocal.size + filteredCached.size + onlineResults.size
+
+            item {
+                Text(
+                    text = "Знайдено результатів: $totalFound",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // Sub-header 1: On device
+            if (filteredLocal.isNotEmpty()) {
                 item {
                     Text(
-                        text = "Нічого не знайдено за запитом «$localSearchQuery»",
+                        text = "📱 На пристрої (${filteredLocal.size}):",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                    )
+                }
+                items(filteredLocal) { track ->
+                    TrackItemRow(
+                        track = track,
+                        onPlay = { viewModel.playLocalTrack(track) },
+                        onAddToPlaylist = { trackToAddToPlaylist = track }
                     )
                 }
             }
 
-            items(filteredLocalTracks) { track ->
-                TrackItemRow(
-                    track = track,
-                    onPlay = { viewModel.playLocalTrack(track) },
-                    onCache = {
-                        viewModel.cacheTrack(track)
-                        Toast.makeText(context, "Збережено в Room офлайн-кеш!", Toast.LENGTH_SHORT).show()
-                    }
-                )
+            // Sub-header 2: In Room cache
+            if (filteredCached.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "💾 У збереженому кеші (${filteredCached.size}):",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                    )
+                }
+                items(filteredCached) { cached ->
+                    CachedTrackRow(
+                        cached = cached,
+                        onPlay = {
+                            viewModel.playTrack(
+                                AudioTrack(
+                                    id = cached.id,
+                                    title = cached.title,
+                                    artist = cached.artist,
+                                    audioUrl = cached.localFilePath ?: cached.originalUrl,
+                                    durationMs = cached.durationMs,
+                                    isLocal = cached.localFilePath != null
+                                )
+                            )
+                        },
+                        onDelete = { viewModel.removeCachedTrack(cached.id) }
+                    )
+                }
+            }
+
+            // Sub-header 3: Online
+            if (onlineResults.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "🌐 Онлайн (${onlineResults.size}):",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                    )
+                }
+                items(onlineResults) { track ->
+                    TrackItemRow(
+                        track = track,
+                        onPlay = { playOnlineSafely { viewModel.playTrack(track) } },
+                        onAddToPlaylist = { trackToAddToPlaylist = track }
+                    )
+                }
+            }
+
+            if (totalFound == 0) {
+                item {
+                    Text(
+                        text = "Нічого не знайдено за запитом «$q»",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else {
+            // Default on-device music list when not searching
+            if (localTracks.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "📱 Музика на пристрої (${localTracks.size}):",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                items(localTracks) { track ->
+                    TrackItemRow(
+                        track = track,
+                        onPlay = { viewModel.playLocalTrack(track) },
+                        onAddToPlaylist = { trackToAddToPlaylist = track }
+                    )
+                }
             }
         }
 
@@ -761,20 +963,9 @@ fun PlayerCoreScreen() {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "💾 Офлайн-кеш Room DB (${cachedTracks.size} знайдено):",
+                        text = "💾 Офлайн-кеш Room DB (${cachedTracks.size} збережено):",
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    OutlinedTextField(
-                        value = cachedFilterQuery,
-                        onValueChange = {
-                            cachedFilterQuery = it
-                            viewModel.searchCachedTracks(it)
-                        },
-                        label = { Text("Швидкий пошук у базі Room...") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
@@ -799,7 +990,7 @@ fun PlayerCoreScreen() {
                     if (cachedTracks.isEmpty()) {
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = if (cachedFilterQuery.isBlank()) "Поки порожньо. Натисніть кнопку «+ Кеш» біля будь-якої пісні." else "Нічого не знайдено за запитом «$cachedFilterQuery»",
+                            text = "Поки порожньо. Натисніть кнопку «+ Кеш» біля будь-якої пісні.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -891,7 +1082,9 @@ fun PlayerCoreScreen() {
             }
         }
 
-        // Section: Audius Search (Пошук онлайн-музики)
+
+
+        // Section: Local Room Playlists (Офлайн-плейлісти на пристрої)
         item {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -899,225 +1092,17 @@ fun PlayerCoreScreen() {
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
                     Text(
-                        text = "🔍 Пошук треків в Audius:",
+                        text = "📁 Мої плейлісти (${localPlaylists.size}):",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = { Text("Пошук пісні/артиста...") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        Button(
-                            onClick = {
-                                if (searchQuery.isNotBlank()) {
-                                    viewModel.searchAudius(searchQuery.trim())
-                                }
-                            }
-                        ) {
-                            Text("Пошук")
-                        }
-                    }
-                }
-            }
-        }
-
-        if (searchedAudius.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Результати пошуку (${searchedAudius.size}):",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-            }
-            items(searchedAudius) { audiusTrack ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = audiusTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
-                            Text(text = audiusTrack.artist, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Button(onClick = { playOnlineSafely { viewModel.playAudiusTrack(audiusTrack) } }) {
-                            Text("▶")
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section: Jamendo Music Search (Основне джерело онлайн-треків)
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+                    Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = "🎸 Пошук треків у Jamendo (Playable Online MP3):",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        text = "Створюйте добірки та додавайте треки кнопкою «📁+» біля будь-якої пісні",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = jamendoQuery,
-                            onValueChange = { jamendoQuery = it },
-                            placeholder = { Text("Наприклад: rock, electronic...") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        Button(
-                            onClick = {
-                                if (jamendoQuery.isNotBlank()) {
-                                    viewModel.searchJamendo(jamendoQuery.trim())
-                                }
-                            }
-                        ) {
-                            Text("Пошук")
-                        }
-                    }
-                }
-            }
-        }
-
-        if (searchedJamendo.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Знайдено в Jamendo (${searchedJamendo.size}):",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-            }
-            items(searchedJamendo) { jamendoTrack ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { playOnlineSafely { viewModel.playJamendoTrack(jamendoTrack) } },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = jamendoTrack.title, fontWeight = FontWeight.Medium, maxLines = 1)
-                            Text(
-                                text = "${jamendoTrack.artist} • ${jamendoTrack.album ?: "Jamendo"}",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Button(onClick = { playOnlineSafely { viewModel.playJamendoTrack(jamendoTrack) } }) {
-                            Text("▶")
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section: Radio by Country (UA)
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = "🇺🇦 Українські радіостанції (Radio Browser + Redis):",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            viewModel.loadRadioByCountry("UA")
-                        }
-                    ) {
-                        Text("📻 Оновити станції України (UA)")
-                    }
-                }
-            }
-        }
-
-        if (radioStationsByCountry.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Радіостанції України (${radioStationsByCountry.size}):",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-            }
-            items(radioStationsByCountry) { station ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { playOnlineSafely { viewModel.playRadioStation(station) } },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = station.name, fontWeight = FontWeight.Medium, maxLines = 1)
-                            Text(
-                                text = "${station.genre ?: "Music"} • ${station.codec ?: "MP3"}",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Button(onClick = { playOnlineSafely { viewModel.playRadioStation(station) } }) {
-                            Text("▶")
-                        }
-                    }
-                }
-            }
-        }
-
-        // Section: Backend Data & Playlists
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = "🌐 Бекенд плейлісти та онлайн-радіо:",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Button(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = {
-                            viewModel.loadBackendData()
-                            Toast.makeText(context, "Завантаження даних із бекенду...", Toast.LENGTH_SHORT).show()
-                        }
-                    ) {
-                        Text("🔄 Оновити дані з бекенду")
-                    }
-
                     Spacer(modifier = Modifier.height(8.dp))
 
                     Row(
@@ -1128,52 +1113,54 @@ fun PlayerCoreScreen() {
                         OutlinedTextField(
                             value = newPlaylistName,
                             onValueChange = { newPlaylistName = it },
-                            placeholder = { Text("Назва нового плейліста") },
+                            placeholder = { Text("Назва нового плейліста...") },
                             modifier = Modifier.weight(1f),
                             singleLine = true
                         )
                         Button(
                             onClick = {
                                 if (newPlaylistName.isNotBlank()) {
-                                    viewModel.createPlaylist(newPlaylistName.trim())
+                                    val name = newPlaylistName.trim()
+                                    viewModel.createPlaylist(name)
                                     newPlaylistName = ""
-                                    Toast.makeText(context, "Плейліст створюється...", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Плейліст «$name» створено!", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Введіть назву плейліста", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         ) {
-                            Text("➕")
+                            Text("➕ Створити")
                         }
+                    }
+
+                    if (localPlaylists.isEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "У вас ще немає створених плейлістів. Введіть назву вище та натисніть «➕ Створити».",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
             }
         }
 
-        // Playlists list
-        if (playlists.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Мої плейлісти (${playlists.size}):",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-            }
-            items(playlists) { pl ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "📁 ${pl.name} (${pl.trackCount} треків)",
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+        items(localPlaylists) { pl ->
+            LocalPlaylistCard(
+                playlist = pl,
+                viewModel = viewModel,
+                isExpanded = expandedPlaylistId == pl.id,
+                onToggleExpand = {
+                    expandedPlaylistId = if (expandedPlaylistId == pl.id) null else pl.id
+                },
+                onDelete = {
+                    viewModel.deleteLocalPlaylist(pl.id)
+                    Toast.makeText(context, "Плейліст «${pl.name}» видалено", Toast.LENGTH_SHORT).show()
+                },
+                onPlayAll = {
+                    viewModel.playLocalPlaylist(pl.id)
                 }
-            }
+            )
         }
 
         // Audius Trending
@@ -1208,41 +1195,51 @@ fun PlayerCoreScreen() {
             }
         }
 
-        // Radio stations list
-        if (radioStations.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Радіостанції (${radioStations.size}):",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
-            }
-            items(radioStations) { station ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { playOnlineSafely { viewModel.playRadioStation(station) } },
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(text = station.name, fontWeight = FontWeight.Medium, maxLines = 1)
-                            Text(text = station.genre ?: "Online Radio", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Button(onClick = { playOnlineSafely { viewModel.playRadioStation(station) } }) {
-                            Text("📻")
-                        }
-                    }
-                }
-            }
-        }
-
         item {
             Spacer(modifier = Modifier.height(32.dp))
         }
+    }
+
+    if (trackToAddToPlaylist != null) {
+        val track = trackToAddToPlaylist!!
+        AlertDialog(
+            onDismissRequest = { trackToAddToPlaylist = null },
+            title = { Text("📁 Додати в плейліст") },
+            text = {
+                if (localPlaylists.isEmpty()) {
+                    Text("У вас ще немає створених плейлістів. Створіть новий плейліст у розділі «Мої плейлісти» нижче.")
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Пісня: ${track.title}",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Оберіть плейліст:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        localPlaylists.forEach { pl ->
+                            OutlinedButton(
+                                modifier = Modifier.fillMaxWidth(),
+                                onClick = {
+                                    viewModel.addTrackToLocalPlaylist(pl.id, track)
+                                    Toast.makeText(context, "Додано до «${pl.name}»", Toast.LENGTH_SHORT).show()
+                                    trackToAddToPlaylist = null
+                                }
+                            ) {
+                                Text("📁 ${pl.name}")
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { trackToAddToPlaylist = null }) {
+                    Text("Закрити")
+                }
+            }
+        )
     }
 }
 
@@ -1250,7 +1247,7 @@ fun PlayerCoreScreen() {
 fun TrackItemRow(
     track: AudioTrack,
     onPlay: () -> Unit,
-    onCache: () -> Unit
+    onAddToPlaylist: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -1278,12 +1275,133 @@ fun TrackItemRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            OutlinedButton(onClick = onCache) {
-                Text("+ Кеш")
+            if (onAddToPlaylist != null) {
+                OutlinedButton(onClick = onAddToPlaylist) {
+                    Text("📁+", fontSize = 11.sp)
+                }
+                Spacer(modifier = Modifier.width(6.dp))
             }
-            Spacer(modifier = Modifier.width(6.dp))
             Button(onClick = onPlay) {
                 Text("▶")
+            }
+        }
+    }
+}
+
+@Composable
+fun LocalPlaylistCard(
+    playlist: LocalPlaylistEntity,
+    viewModel: MainPlayerViewModel,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onDelete: () -> Unit,
+    onPlayAll: () -> Unit
+) {
+    val tracks by viewModel.getPlaylistTracks(playlist.id).collectAsState(initial = emptyList())
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onToggleExpand() },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "📁 ${playlist.name}",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp
+                    )
+                    Text(
+                        text = "${tracks.size} треків",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (tracks.isNotEmpty()) {
+                        Button(onClick = onPlayAll) {
+                            Text("▶ Грати", fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    IconButton(onClick = onDelete) {
+                        Text("🗑", fontSize = 16.sp)
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (isExpanded) "▲" else "▼", fontSize = 12.sp)
+                }
+            }
+
+            if (isExpanded) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (tracks.isEmpty()) {
+                    Text(
+                        text = "Плейліст порожній. Натисніть «📁+» біля будь-якої пісні у списку вище, щоб додати її сюди.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    tracks.forEach { trackEntity ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = trackEntity.title,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = trackEntity.artist,
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            IconButton(onClick = {
+                                val audioTrack = AudioTrack(
+                                    id = trackEntity.trackId,
+                                    title = trackEntity.title,
+                                    artist = trackEntity.artist,
+                                    audioUrl = trackEntity.audioUrl,
+                                    durationMs = trackEntity.durationMs,
+                                    isLocal = trackEntity.isLocal
+                                )
+                                viewModel.playTrack(audioTrack)
+                            }) {
+                                Text("▶", fontSize = 14.sp)
+                            }
+                            IconButton(onClick = {
+                                viewModel.removeTrackFromLocalPlaylist(playlist.id, trackEntity.trackId)
+                            }) {
+                                Text("✕", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1293,7 +1411,8 @@ fun TrackItemRow(
 fun CachedTrackRow(
     cached: CachedTrackEntity,
     onPlay: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onAddToPlaylist: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -1319,6 +1438,12 @@ fun CachedTrackRow(
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1
                 )
+            }
+            if (onAddToPlaylist != null) {
+                OutlinedButton(onClick = onAddToPlaylist) {
+                    Text("📁+", fontSize = 11.sp)
+                }
+                Spacer(modifier = Modifier.width(4.dp))
             }
             Button(onClick = onPlay) {
                 Text("▶")
