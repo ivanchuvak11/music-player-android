@@ -209,9 +209,7 @@ object AudioEffectsManager {
     @Synchronized
     fun init(audioSessionId: Int) {
         if (audioSessionId == 0 || audioSessionId == currentSessionId) return
-        // Fix #20: release() resets currentSessionId; if it throws, still continue with new session
         release()
-        currentSessionId = audioSessionId
 
         try {
             val canEnable = _effectsState.value.isEnabled && _effectsState.value.isHeadphonesConnected
@@ -255,6 +253,9 @@ object AudioEffectsManager {
                 e.printStackTrace()
             }
 
+            // Only mark session as active once hardware effects are successfully attached
+            currentSessionId = audioSessionId
+
             _effectsState.value = _effectsState.value.copy(
                 numberOfBands = numBands,
                 bandLevels = bandsMap,
@@ -263,6 +264,8 @@ object AudioEffectsManager {
             )
         } catch (e: Throwable) {
             e.printStackTrace()
+            // Clean up partially initialized effects and reset currentSessionId to 0 for clean retry
+            release()
         }
     }
 
