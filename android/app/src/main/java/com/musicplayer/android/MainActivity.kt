@@ -33,6 +33,7 @@ import com.musicplayer.android.core.database.CachedTrackEntity
 import com.musicplayer.android.core.database.LocalPlaylistEntity
 import com.musicplayer.android.core.database.LocalPlaylistTrackEntity
 import com.musicplayer.android.core.network.RadioStationDto
+import com.musicplayer.android.core.audio.calculateSearchRelevanceScore
 import com.musicplayer.android.core.audio.toAudioTrack
 import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 
@@ -885,14 +886,18 @@ fun PlayerCoreScreen() {
         // Unified Search Results or Default Local Library
         if (unifiedSearchQuery.isNotBlank()) {
             val q = unifiedSearchQuery.trim()
-            val filteredLocal = localTracks.filter {
-                it.title.contains(q, ignoreCase = true) || it.artist.contains(q, ignoreCase = true)
-            }
-            val filteredCached = cachedTracks.filter {
-                it.title.contains(q, ignoreCase = true) || it.artist.contains(q, ignoreCase = true)
-            }
-            val onlineResults = searchedJamendo.map { AudioTrack.fromJamendo(it, viewModel.getBaseUrl()) } +
+            val filteredLocal = localTracks
+                .filter { it.calculateSearchRelevanceScore(q) >= 0 }
+                .sortedByDescending { it.calculateSearchRelevanceScore(q) }
+            val filteredCached = cachedTracks
+                .filter { it.toAudioTrack().calculateSearchRelevanceScore(q) >= 0 }
+                .sortedByDescending { it.toAudioTrack().calculateSearchRelevanceScore(q) }
+            val rawOnline = searchedJamendo.map { AudioTrack.fromJamendo(it, viewModel.getBaseUrl()) } +
                 searchedAudius.map { AudioTrack.fromAudius(it, viewModel.getBaseUrl()) }
+            val onlineResults = rawOnline
+                .filter { it.calculateSearchRelevanceScore(q) >= 0 }
+                .distinctBy { "${it.title.trim().lowercase()}_${it.artist.trim().lowercase()}" }
+                .sortedByDescending { it.calculateSearchRelevanceScore(q) }
 
             val totalFound = filteredLocal.size + filteredCached.size + onlineResults.size
 

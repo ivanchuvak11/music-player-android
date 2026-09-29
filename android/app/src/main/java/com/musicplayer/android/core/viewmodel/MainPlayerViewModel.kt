@@ -601,6 +601,8 @@ class MainPlayerViewModel(
                 if (resp.isSuccessful) {
                     _searchedAudiusTracks.value = resp.body().orEmpty()
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 e.printStackTrace()
             }

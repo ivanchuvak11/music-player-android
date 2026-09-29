@@ -2,6 +2,7 @@ package com.musicplayer.android.core
 
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.PlaybackState
+import com.musicplayer.android.core.audio.calculateSearchRelevanceScore
 import com.musicplayer.android.core.audio.toAudioTrack
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -436,5 +437,53 @@ class AudioModelTest {
         assertEquals("http://example.com/pl_art.png", plAudioTrack.artworkUrl)
         assertTrue(plAudioTrack.isLocal)
     }
+
+    @Test
+    fun testSearchRelevanceScoring() {
+        val exactTrack = AudioTrack(
+            id = "1",
+            title = "Believer",
+            artist = "Imagine Dragons",
+            audioUrl = "http://example.com/1.mp3"
+        )
+        val prefixTrack = AudioTrack(
+            id = "2",
+            title = "Believer (Acoustic Remix)",
+            artist = "Another Artist",
+            audioUrl = "http://example.com/2.mp3"
+        )
+        val wordBoundaryTrack = AudioTrack(
+            id = "3",
+            title = "I am a Believer",
+            artist = "The Monkees",
+            audioUrl = "http://example.com/3.mp3"
+        )
+        val artistMatchTrack = AudioTrack(
+            id = "4",
+            title = "Radioactive",
+            artist = "Believer Band",
+            audioUrl = "http://example.com/4.mp3"
+        )
+        val irrelevantTrack = AudioTrack(
+            id = "5",
+            title = "Shape of You",
+            artist = "Ed Sheeran",
+            audioUrl = "http://example.com/5.mp3"
+        )
+
+        val query = "Believer"
+        val exactScore = exactTrack.calculateSearchRelevanceScore(query)
+        val prefixScore = prefixTrack.calculateSearchRelevanceScore(query)
+        val boundaryScore = wordBoundaryTrack.calculateSearchRelevanceScore(query)
+        val artistScore = artistMatchTrack.calculateSearchRelevanceScore(query)
+        val irrelevantScore = irrelevantTrack.calculateSearchRelevanceScore(query)
+
+        assertTrue("Exact match score must be > prefix score", exactScore > prefixScore)
+        assertTrue("Prefix score must be > word boundary score", prefixScore > boundaryScore)
+        assertTrue("Boundary score must be > artist score", boundaryScore > artistScore)
+        assertTrue("Artist match score must be positive", artistScore > 0)
+        assertEquals("Irrelevant score must be -1", -1, irrelevantScore)
+    }
 }
+
 
