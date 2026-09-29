@@ -4,7 +4,7 @@
     <string name="app_subtitle">Повна функціональна панель: плеєр, авторизація, радіо, база Room</string>
     <string name="status_online">🟢 Онлайн</string>
     <string name="status_offline">🔴 Офлайн</string>
-    <string name="offline_banner_text">Ви зараз офлайн. Треки з пам\'яті телефону доступні для прослуховування!</string>
+    <string name="offline_banner_text">Ви зараз офлайн. Треки з пам\'яті телефону та завантажена музика доступні для прослуховування!</string>
     <string name="btn_play">Відтворити</string>
     <string name="btn_pause">Пауза</string>
     <string name="btn_next">Наступний</string>
@@ -20,6 +20,26 @@
     <string name="tab_all">Всі</string>
     <string name="tab_local">Локальні</string>
     <string name="tab_online">Онлайн</string>
+    <string name="tab_downloaded">Завантажені</string>
     <string name="error_network_generic">Немає з\'єднання з мережею</string>
     <string name="error_jamendo_unavailable">Jamendo сервіс тимчасово недоступний</string>
+
+    <!-- EQ Presets -->
+    <string name="preset_flat">Звичайний</string>
+    <string name="preset_bass">Підсилений бас</string>
+    <string name="preset_rock">Рок</string>
+    <string name="preset_pop">Поп</string>
+    <string name="preset_jazz">Джаз</string>
+    <string name="preset_classical">Класика</string>
+    <string name="preset_custom">Власний</string>
+
+    <!-- Permissions -->
+    <string name="permission_audio_title">Потрібен доступ до аудіофайлів</string>
+    <string name="permission_audio_desc">Дозвіл на читання музики необхідний для сканування та відтворення треків з вашого пристрою.</string>
+    <string name="permission_notification_title">Сповіщення плеєра</string>
+    <string name="permission_notification_desc">Дозвіл на сповіщення дозволяє керувати музикою з панелі сповіщень та заблокованого екрана.</string>
+    <string name="permission_bluetooth_title">Підключення Bluetooth</string>
+    <string name="permission_bluetooth_desc">Дозвіл Bluetooth дозволяє кнопкам на навушниках та в авто керувати плеєром.</string>
+    <string name="permission_grant">Надати дозвіл</string>
+    <string name="permission_settings">Відкрити налаштування</string>
 </resources>

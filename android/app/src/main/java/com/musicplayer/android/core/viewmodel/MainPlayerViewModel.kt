@@ -198,6 +198,11 @@ class MainPlayerViewModel(
         // Restore persisted Equalizer & Bass Boost preferences
         AudioEffectsManager.restorePersistedState(application)
 
+        // Clean up any incomplete .tmp download files from interrupted sessions
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.musicplayer.android.core.audio.TrackDownloadManager.cleanupOrphanTempFiles(application)
+        }
+
         // Fix #10: Debounce media changes by 1500ms to avoid 30 redundant scans per download
         loadLocalTracks()
         viewModelScope.launch {
@@ -931,34 +936,98 @@ class MainPlayerViewModel(
         }
     }
 
+    // Active download jobs & progress
+    private val activeDownloadJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    private val _downloadProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val downloadProgress: StateFlow<Map<String, Int>> = _downloadProgress.asStateFlow()
+
     // Offline caching & Room DB operations
     fun cacheTrack(track: AudioTrack) {
-        viewModelScope.launch {
+        // Rule 1: Never download live streams
+        if (track.isLiveStream) {
+            _authStatusMessage.value = "Неможливо завантажити прямий радіоефір"
+            return
+        }
+
+        // Cancel previous job for the same track if any
+        activeDownloadJobs[track.id]?.cancel()
+
+        val job = viewModelScope.launch {
             try {
+                // If it's a remote URL, download it to private app storage first
+                val localFile = if (!track.isLocal && track.audioUrl.startsWith("http")) {
+                    com.musicplayer.android.core.audio.TrackDownloadManager.downloadTrackToPrivateStorage(
+                        context = getApplication(),
+                        trackId = track.id,
+                        audioUrl = track.audioUrl,
+                        isLiveStream = track.isLiveStream,
+                        onProgress = { progress ->
+                            val current = _downloadProgress.value.toMutableMap()
+                            current[track.id] = progress
+                            _downloadProgress.value = current
+                        }
+                    )
+                } else null
+
+                // Rule 2: If download failed or returned null, DO NOT create a corrupt Room record!
+                if (!track.isLocal && track.audioUrl.startsWith("http") && localFile == null) {
+                    _authStatusMessage.value = "Не вдалося завантажити трек: помилка мережі"
+                    return@launch
+                }
+
+                val localPath = localFile?.absolutePath
+
                 db.cachedTrackDao().insertTrack(
                     CachedTrackEntity(
                         id = track.id,
                         title = track.title,
                         artist = track.artist,
-                        localFilePath = null,
+                        localFilePath = localPath,
                         originalUrl = track.audioUrl,
                         artworkUrl = track.artworkUrl, // Fix #14: save artworkUrl
                         durationMs = track.durationMs,
                         cachedAtTimestamp = System.currentTimeMillis()
                     )
                 )
+                _authStatusMessage.value = "Трек збережено офлайн"
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // Clean up on cancel
+                throw e
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("MainPlayerViewModel", "Error caching track: ${e.message}", e)
+                _authStatusMessage.value = "Помилка завантаження: ${e.message}"
+            } finally {
+                activeDownloadJobs.remove(track.id)
+                val current = _downloadProgress.value.toMutableMap()
+                current.remove(track.id)
+                _downloadProgress.value = current
             }
         }
+        activeDownloadJobs[track.id] = job
+    }
+
+    fun cancelDownload(trackId: String) {
+        activeDownloadJobs[trackId]?.cancel()
+        activeDownloadJobs.remove(trackId)
+        val current = _downloadProgress.value.toMutableMap()
+        current.remove(trackId)
+        _downloadProgress.value = current
     }
 
     fun removeCachedTrack(trackId: String) {
         viewModelScope.launch {
             try {
+                // Step 1: Remove physical file first
+                val existing = db.cachedTrackDao().getTrackById(trackId)
+                if (existing?.localFilePath != null) {
+                    com.musicplayer.android.core.audio.TrackDownloadManager.deleteDownloadedTrack(
+                        localFilePath = existing.localFilePath
+                    )
+                }
+                // Step 2: Remove DB record
                 db.cachedTrackDao().deleteTrack(trackId)
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("MainPlayerViewModel", "Error removing cached track: ${e.message}", e)
             }
         }
     }

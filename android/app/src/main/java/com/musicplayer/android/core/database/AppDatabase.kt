@@ -221,6 +221,7 @@ abstract class AppDatabase : RoomDatabase() {
                             false
                         }
                         if (isDebug) {
+                            android.util.Log.w("AppDatabase", "WARNING: fallbackToDestructiveMigration is ACTIVE for debug build. Release builds require explicit migrations.")
                             fallbackToDestructiveMigration()
                             fallbackToDestructiveMigrationOnDowngrade()
                         }

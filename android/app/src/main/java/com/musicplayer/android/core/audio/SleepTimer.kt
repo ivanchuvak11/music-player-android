@@ -21,7 +21,8 @@ import kotlinx.coroutines.launch
  */
 object SleepTimer {
 
-    private val scope = CoroutineScope(Dispatchers.Main)
+    private val timerSupervisor = kotlinx.coroutines.SupervisorJob()
+    private val scope = CoroutineScope(Dispatchers.Main.immediate + timerSupervisor)
     private var timerJob: Job? = null
 
     private val _remainingSeconds = MutableStateFlow(0L)
@@ -58,5 +59,10 @@ object SleepTimer {
         timerJob = null
         _isActive.value = false
         _remainingSeconds.value = 0L
+    }
+
+    fun shutdown() {
+        cancel()
+        timerSupervisor.cancel()
     }
 }
