@@ -20,6 +20,7 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+        resourceConfigurations += listOf("uk", "en")
     }
 
     signingConfigs {
@@ -73,7 +74,10 @@ android {
                 "/META-INF/{AL2.0,LGPL2.1}",
                 "/META-INF/LICENSE*",
                 "/META-INF/NOTICE*",
-                "/META-INF/*.version"
+                "/META-INF/*.version",
+                "/META-INF/*.kotlin_module",
+                "DebugProbesKt.bin",
+                "kotlin-tooling-metadata.json"
             )
         }
     }
