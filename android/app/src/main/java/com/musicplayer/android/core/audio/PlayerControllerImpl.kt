@@ -35,8 +35,11 @@ import kotlinx.coroutines.launch
  */
 class PlayerControllerImpl(
     private val context: Context,
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Main)
+    externalScope: CoroutineScope? = null
 ) : PlayerController {
+
+    private val controllerJob = kotlinx.coroutines.SupervisorJob()
+    private val scope: CoroutineScope = externalScope ?: CoroutineScope(Dispatchers.Main.immediate + controllerJob)
 
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
@@ -445,6 +448,7 @@ class PlayerControllerImpl(
         retryJob?.cancel()
         retryJob = null
         stopProgressTracker()
+        controllerJob.cancel()
         controllerFuture?.let { MediaController.releaseFuture(it) }
         mediaController = null
         pendingQueue = null

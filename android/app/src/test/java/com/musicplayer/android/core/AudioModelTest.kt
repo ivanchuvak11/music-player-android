@@ -484,6 +484,19 @@ class AudioModelTest {
         assertTrue("Artist match score must be positive", artistScore > 0)
         assertEquals("Irrelevant score must be -1", -1, irrelevantScore)
     }
+
+    @Test
+    fun testTrackDownloadManagerConstants() {
+        assertEquals(150L * 1024 * 1024, com.musicplayer.android.core.audio.TrackDownloadManager.MAX_FILE_SIZE_BYTES)
+        assertEquals(50L * 1024, com.musicplayer.android.core.audio.TrackDownloadManager.MIN_FILE_SIZE_BYTES)
+    }
+
+    @Test
+    fun testSleepTimerStateAndCancel() {
+        com.musicplayer.android.core.audio.SleepTimer.cancel()
+        assertFalse(com.musicplayer.android.core.audio.SleepTimer.isActive.value)
+        assertEquals(0L, com.musicplayer.android.core.audio.SleepTimer.remainingSeconds.value)
+    }
 }
 
 
