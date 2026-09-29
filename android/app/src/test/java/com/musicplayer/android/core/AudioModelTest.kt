@@ -320,4 +320,43 @@ class AudioModelTest {
         )
         assertEquals(500, state.loudnessEnhancerGainMb)
     }
+
+    @Test
+    fun testLocalPlaylistEntityCreation() {
+        val playlist = com.musicplayer.android.core.database.LocalPlaylistEntity(
+            id = 1L,
+            name = "Мій Рок"
+        )
+        assertEquals(1L, playlist.id)
+        assertEquals("Мій Рок", playlist.name)
+        assertTrue(playlist.createdAt > 0)
+    }
+
+    @Test
+    fun testLocalPlaylistTrackEntityCreation() {
+        val track = com.musicplayer.android.core.database.LocalPlaylistTrackEntity(
+            id = 10L,
+            playlistId = 1L,
+            trackId = "track_123",
+            title = "Wind of Change",
+            artist = "Scorpions",
+            audioUrl = "content://media/123",
+            durationMs = 312000L,
+            isLocal = true
+        )
+        assertEquals(1L, track.playlistId)
+        assertEquals("track_123", track.trackId)
+        assertEquals("Wind of Change", track.title)
+        assertTrue(track.isLocal)
+    }
+
+    @Test
+    fun testDefaultUkrainianRadioStationsPresent() {
+        val stations = com.musicplayer.android.core.viewmodel.MainPlayerViewModel.DEFAULT_UA_RADIO_STATIONS
+        assertTrue("Default stations should not be empty", stations.isNotEmpty())
+        assertTrue("Should include Hit FM", stations.any { it.name.contains("Хіт FM") })
+        assertTrue("Should include Kiss FM", stations.any { it.name.contains("Kiss FM") })
+        assertTrue("Should include Radio ROKS", stations.any { it.name.contains("Radio ROKS") })
+        assertTrue("All stations must have valid stream URLs", stations.all { it.streamUrl.startsWith("http") })
+    }
 }

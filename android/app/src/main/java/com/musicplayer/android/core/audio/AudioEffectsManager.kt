@@ -5,9 +5,12 @@ import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
 import com.musicplayer.android.core.session.SessionManager
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * State representing audio equalizer, bass boost, and loudness normalization settings.
@@ -110,8 +113,9 @@ object AudioEffectsManager {
 
             try {
                 val le = LoudnessEnhancer(audioSessionId).apply {
-                    enabled = _effectsState.value.isEnabled
-                    setTargetGain(_effectsState.value.loudnessEnhancerGainMb)
+                    val gain = _effectsState.value.loudnessEnhancerGainMb
+                    enabled = _effectsState.value.isEnabled && gain > 0
+                    if (gain > 0) setTargetGain(gain)
                 }
                 loudnessEnhancer = le
             } catch (e: Throwable) {
@@ -134,7 +138,7 @@ object AudioEffectsManager {
         try {
             equalizer?.enabled = enabled
             bassBoost?.enabled = enabled
-            loudnessEnhancer?.enabled = enabled
+            loudnessEnhancer?.enabled = enabled && _effectsState.value.loudnessEnhancerGainMb > 0
         } catch (e: Throwable) {
             e.printStackTrace()
         }
@@ -215,25 +219,8 @@ object AudioEffectsManager {
             e.printStackTrace()
         }
 
-        // Dynamically boost low frequencies in equalizer to guarantee punch on all speakers
-        val maxLevel = _effectsState.value.maxBandLevel
-        val lowBoost = (clampedStrength.toFloat() / 1000f * (maxLevel * 0.7f)).toInt().toShort()
-        val midBassBoost = (clampedStrength.toFloat() / 1000f * (maxLevel * 0.4f)).toInt().toShort()
-
-        val updatedMap = _effectsState.value.bandLevels.toMutableMap()
-        if (_effectsState.value.currentPreset == AudioEffectsState.PRESET_FLAT ||
-            _effectsState.value.currentPreset == AudioEffectsState.PRESET_BASS) {
-            updatedMap[0.toShort()] = lowBoost
-            updatedMap[1.toShort()] = midBassBoost
-            try {
-                equalizer?.setBandLevel(0.toShort(), lowBoost)
-                equalizer?.setBandLevel(1.toShort(), midBassBoost)
-            } catch (e: Throwable) { }
-        }
-
         _effectsState.value = _effectsState.value.copy(
-            bassBoostStrength = clampedStrength,
-            bandLevels = updatedMap
+            bassBoostStrength = clampedStrength
         )
         if (context != null) persistState(context)
     }
@@ -242,7 +229,10 @@ object AudioEffectsManager {
     fun setLoudnessEnhancerGain(gainMb: Int) {
         val clampedGain = gainMb.coerceIn(0, 1000)
         try {
-            loudnessEnhancer?.setTargetGain(clampedGain)
+            loudnessEnhancer?.let {
+                it.enabled = _effectsState.value.isEnabled && clampedGain > 0
+                if (clampedGain > 0) it.setTargetGain(clampedGain)
+            }
         } catch (e: Throwable) {
             e.printStackTrace()
         }
@@ -266,6 +256,13 @@ object AudioEffectsManager {
         if (context != null) persistState(context)
     }
 
+    @Synchronized
+    fun resetToFlat(context: Context? = null) {
+        setPreset(AudioEffectsState.PRESET_FLAT, context)
+        setBassBoost(0.toShort(), context)
+        setLoudnessEnhancerGain(0)
+    }
+
     fun restorePersistedState(context: Context) {
         try {
             val sessionManager = SessionManager.getInstance(context)
@@ -285,16 +282,18 @@ object AudioEffectsManager {
     }
 
     private fun persistState(context: Context) {
-        try {
-            val state = _effectsState.value
-            SessionManager.getInstance(context).saveEqualizerState(
-                enabled = state.isEnabled,
-                preset = state.currentPreset,
-                bassBoost = state.bassBoostStrength,
-                bandLevels = state.bandLevels
-            )
-        } catch (e: Throwable) {
-            e.printStackTrace()
+        val state = _effectsState.value
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                SessionManager.getInstance(context).saveEqualizerState(
+                    enabled = state.isEnabled,
+                    preset = state.currentPreset,
+                    bassBoost = state.bassBoostStrength,
+                    bandLevels = state.bandLevels
+                )
+            } catch (e: Throwable) {
+                e.printStackTrace()
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package com.musicplayer.android.core.session
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.musicplayer.android.core.audio.AudioTrack
 
 /**
  * Manages persistent user session, authentication token, playback preferences,
@@ -144,13 +145,51 @@ class SessionManager(context: Context) {
         return map
     }
 
-    // Resume position persistence
+    // Resume position & last track memory persistence
     fun saveLastPlaybackPosition(trackId: String, positionMs: Long) {
         prefs.edit().apply {
             putString(KEY_LAST_TRACK_ID, trackId)
             putLong(KEY_LAST_POSITION_MS, positionMs)
             apply()
         }
+    }
+
+    fun saveLastPlayedTrack(track: AudioTrack, positionMs: Long) {
+        prefs.edit().apply {
+            putString(KEY_LAST_TRACK_ID, track.id)
+            putString("last_track_title", track.title)
+            putString("last_track_artist", track.artist)
+            putString("last_track_url", track.audioUrl)
+            putString("last_track_artwork", track.artworkUrl)
+            putLong("last_track_duration", track.durationMs)
+            putBoolean("last_track_is_local", track.isLocal)
+            putBoolean("last_track_is_live", track.isLiveStream)
+            putLong(KEY_LAST_POSITION_MS, positionMs)
+            apply()
+        }
+    }
+
+    fun getLastPlayedTrack(): Pair<AudioTrack, Long>? {
+        val id = prefs.getString(KEY_LAST_TRACK_ID, null) ?: return null
+        val title = prefs.getString("last_track_title", null) ?: return null
+        val artist = prefs.getString("last_track_artist", "") ?: ""
+        val url = prefs.getString("last_track_url", null) ?: return null
+        val artwork = prefs.getString("last_track_artwork", null)
+        val duration = prefs.getLong("last_track_duration", 0L)
+        val isLocal = prefs.getBoolean("last_track_is_local", true)
+        val isLive = prefs.getBoolean("last_track_is_live", false)
+        val pos = prefs.getLong(KEY_LAST_POSITION_MS, 0L)
+        val track = AudioTrack(
+            id = id,
+            title = title,
+            artist = artist,
+            audioUrl = url,
+            artworkUrl = artwork,
+            durationMs = duration,
+            isLocal = isLocal,
+            isLiveStream = isLive
+        )
+        return Pair(track, pos)
     }
 
     fun getLastTrackId(): String? = prefs.getString(KEY_LAST_TRACK_ID, null)
