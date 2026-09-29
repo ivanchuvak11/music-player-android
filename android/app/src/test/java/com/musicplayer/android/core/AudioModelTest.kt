@@ -2,6 +2,7 @@ package com.musicplayer.android.core
 
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.PlaybackState
+import com.musicplayer.android.core.audio.toAudioTrack
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -373,6 +374,67 @@ class AudioModelTest {
         val result = com.musicplayer.android.core.audio.AudioEffectsManager.setEnabled(true, null)
         assertFalse("Equalizer must not enable when headphones are not connected", result)
         assertFalse("State isEnabled must remain false", com.musicplayer.android.core.audio.AudioEffectsManager.effectsState.value.isEnabled)
+    }
+
+    @Test
+    fun testEntityToAudioTrackExtensions() {
+        val cached = com.musicplayer.android.core.database.CachedTrackEntity(
+            id = "cache_1",
+            title = "Cached Song",
+            artist = "Cached Artist",
+            localFilePath = "/data/local.mp3",
+            originalUrl = "http://example.com/song.mp3",
+            artworkUrl = "http://example.com/art.png",
+            durationMs = 120000L,
+            cachedAtTimestamp = 1000L
+        )
+        val cachedTrack = cached.toAudioTrack()
+        assertEquals("cache_1", cachedTrack.id)
+        assertEquals("/data/local.mp3", cachedTrack.audioUrl)
+        assertEquals("http://example.com/art.png", cachedTrack.artworkUrl)
+        assertTrue(cachedTrack.isLocal)
+
+        val fav = com.musicplayer.android.core.database.FavoriteTrackEntity(
+            id = "fav_1",
+            title = "Fav Song",
+            artist = "Fav Artist",
+            audioUrl = "http://example.com/fav.mp3",
+            artworkUrl = "http://example.com/fav_art.png",
+            durationMs = 150000L
+        )
+        val favTrack = fav.toAudioTrack()
+        assertEquals("fav_1", favTrack.id)
+        assertEquals("http://example.com/fav_art.png", favTrack.artworkUrl)
+        assertFalse(favTrack.isLocal)
+
+        val hist = com.musicplayer.android.core.database.PlayHistoryEntity(
+            historyId = 5L,
+            trackId = "hist_1",
+            title = "Hist Song",
+            artist = "Hist Artist",
+            audioUrl = "content://media/external/audio/media/99",
+            artworkUrl = null,
+            durationMs = 90000L
+        )
+        val histTrack = hist.toAudioTrack()
+        assertEquals("hist_1", histTrack.id)
+        assertTrue(histTrack.isLocal)
+
+        val plTrack = com.musicplayer.android.core.database.LocalPlaylistTrackEntity(
+            id = 1L,
+            playlistId = 10L,
+            trackId = "pl_track_1",
+            title = "Playlist Track",
+            artist = "Playlist Artist",
+            audioUrl = "content://media/external/audio/media/100",
+            artworkUrl = "http://example.com/pl_art.png",
+            durationMs = 180000L,
+            isLocal = true
+        )
+        val plAudioTrack = plTrack.toAudioTrack()
+        assertEquals("pl_track_1", plAudioTrack.id)
+        assertEquals("http://example.com/pl_art.png", plAudioTrack.artworkUrl)
+        assertTrue(plAudioTrack.isLocal)
     }
 }
 
