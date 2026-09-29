@@ -1,5 +1,6 @@
 using System.Text.Json;
 using MusicPlayer.Api.DTOs.Jamendo;
+using MusicPlayer.Api.Infrastructure;
 
 namespace MusicPlayer.Api.Services;
 
@@ -21,7 +22,8 @@ public class JamendoService
 
     public async Task<List<JamendoTrackDto>> SearchAsync(
         string query,
-        int limit = 20)
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         query = query.Trim();
 
@@ -36,10 +38,13 @@ public class JamendoService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(10),
-            () => FetchSearchAsync(query, limit));
+            () => FetchSearchAsync(query, limit, cancellationToken),
+            cancellationToken);
     }
 
-    public async Task<JamendoTrackDto?> GetTrackAsync(string trackId)
+    public async Task<JamendoTrackDto?> GetTrackAsync(
+        string trackId,
+        CancellationToken cancellationToken = default)
     {
         trackId = trackId.Trim();
 
@@ -51,14 +56,16 @@ public class JamendoService
         return await _cache.GetOrCreateAsync<JamendoTrackDto?>(
             cacheKey,
             TimeSpan.FromHours(1),
-            () => FetchTrackAsync(trackId));
+            () => FetchTrackAsync(trackId, cancellationToken),
+            cancellationToken);
     }
 
     public async Task<HttpResponseMessage> GetStreamAsync(
         string trackId,
+        string? rangeHeader,
         CancellationToken cancellationToken = default)
     {
-        var track = await GetTrackAsync(trackId);
+        var track = await GetTrackAsync(trackId, cancellationToken);
 
         if (track is null)
         {
@@ -82,15 +89,21 @@ public class JamendoService
             };
         }
 
-        return await _httpClient.GetAsync(
-            track.StreamUrl,
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            track.StreamUrl);
+        request.ApplyRangeHeader(rangeHeader);
+
+        return await _httpClient.SendAsync(
+            request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
     }
 
     private async Task<List<JamendoTrackDto>> FetchSearchAsync(
         string query,
-        int limit)
+        int limit,
+        CancellationToken cancellationToken)
     {
         var url =
             "tracks/?" +
@@ -102,18 +115,22 @@ public class JamendoService
             "&include=licenses+musicinfo" +
             $"&search={Uri.EscapeDataString(query)}";
 
-        using var stream =
-            await _httpClient.GetStreamAsync(url);
+        using var stream = await _httpClient.GetStreamAsync(
+            url,
+            cancellationToken);
 
-        using var document =
-            await JsonDocument.ParseAsync(stream);
+        using var document = await JsonDocument.ParseAsync(
+            stream,
+            cancellationToken: cancellationToken);
 
         EnsureSuccessfulResponse(document.RootElement);
 
         return ParseTracks(document.RootElement);
     }
 
-    private async Task<JamendoTrackDto?> FetchTrackAsync(string trackId)
+    private async Task<JamendoTrackDto?> FetchTrackAsync(
+        string trackId,
+        CancellationToken cancellationToken)
     {
         var url =
             "tracks/?" +
@@ -124,11 +141,13 @@ public class JamendoService
             "&include=licenses+musicinfo" +
             $"&id={Uri.EscapeDataString(trackId)}";
 
-        using var stream =
-            await _httpClient.GetStreamAsync(url);
+        using var stream = await _httpClient.GetStreamAsync(
+            url,
+            cancellationToken);
 
-        using var document =
-            await JsonDocument.ParseAsync(stream);
+        using var document = await JsonDocument.ParseAsync(
+            stream,
+            cancellationToken: cancellationToken);
 
         EnsureSuccessfulResponse(document.RootElement);
 
@@ -141,7 +160,7 @@ public class JamendoService
 
         if (string.IsNullOrWhiteSpace(clientId))
         {
-            throw new InvalidOperationException(
+            throw new ExternalServiceConfigurationException(
                 "Jamendo ClientId is not configured.");
         }
 
@@ -206,7 +225,7 @@ public class JamendoService
             GetNullableString(headers, "error_message") ??
             "Jamendo API request failed.";
 
-        throw new InvalidOperationException(errorMessage);
+        throw new HttpRequestException(errorMessage);
     }
 
     private static string GetString(

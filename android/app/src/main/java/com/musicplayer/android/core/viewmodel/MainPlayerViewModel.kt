@@ -34,6 +34,7 @@ import com.musicplayer.android.core.network.PlaylistSummaryDto
 import com.musicplayer.android.core.network.RadioStationDto
 import com.musicplayer.android.core.network.RegisterRequestDto
 import com.musicplayer.android.core.session.SessionManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -544,7 +545,6 @@ class MainPlayerViewModel(
                 loadPlaylists()
                 loadFavoriteRadio()
                 loadFavoriteTracks()
-                loadRadioByCountry("UA")
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -567,9 +567,16 @@ class MainPlayerViewModel(
                 val resp = apiService.searchJamendoTracks(query.trim(), limit)
                 if (resp.isSuccessful) {
                     _searchedJamendoTracks.value = resp.body().orEmpty()
+                    if (_authStatusMessage.value?.startsWith("Jamendo") == true ||
+                        _authStatusMessage.value?.startsWith("Помилка Jamendo") == true
+                    ) {
+                        _authStatusMessage.value = null
+                    }
                 } else {
                     _authStatusMessage.value = "Помилка Jamendo: HTTP ${resp.code()}"
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _authStatusMessage.value = "Jamendo недоступний: ${e.message}"
             } finally {
@@ -1086,6 +1093,15 @@ class MainPlayerViewModel(
                 countryCode = "UA",
                 genre = "Український Поп",
                 codec = "MP3/AAC"
+            ),
+            RadioStationDto(
+                stationId = "radiotrek_ua",
+                name = "Радіо Трек",
+                streamUrl = "http://online2.radiotrek.rv.ua:8000/MP3_128",
+                country = "Ukraine",
+                countryCode = "UA",
+                genre = "Поп / Новини",
+                codec = "MP3"
             )
         )
     }

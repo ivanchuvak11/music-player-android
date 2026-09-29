@@ -72,7 +72,6 @@ fun PlayerCoreScreen() {
     val trendingAudius by viewModel.trendingAudiusTracks.collectAsState()
     val searchedAudius by viewModel.searchedAudiusTracks.collectAsState()
     val searchedJamendo by viewModel.searchedJamendoTracks.collectAsState()
-    val radioStationsByCountry by viewModel.radioStationsByCountry.collectAsState()
     val cachedTracks by viewModel.searchedCachedTracks.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val authStatus by viewModel.authStatusMessage.collectAsState()
@@ -106,7 +105,7 @@ fun PlayerCoreScreen() {
     LaunchedEffect(playbackState.currentTrack) {
         val track = playbackState.currentTrack
         if (track != null && track.isLiveStream) {
-            val stations = radioStationsByCountry.ifEmpty { MainPlayerViewModel.DEFAULT_UA_RADIO_STATIONS }
+            val stations = MainPlayerViewModel.DEFAULT_UA_RADIO_STATIONS
             val idx = stations.indexOfFirst { it.name == track.title }
             if (idx >= 0) {
                 currentRadioIndex = idx
@@ -712,7 +711,7 @@ fun PlayerCoreScreen() {
 
         // 📻 Compact Live Radio Bar with Station Switcher
         item {
-            val stations = radioStationsByCountry.ifEmpty { MainPlayerViewModel.DEFAULT_UA_RADIO_STATIONS }
+            val stations = MainPlayerViewModel.DEFAULT_UA_RADIO_STATIONS
             val safeIndex = currentRadioIndex.coerceIn(0, (stations.size - 1).coerceAtLeast(0))
             val currentStation = stations.getOrNull(safeIndex)
 

@@ -210,7 +210,18 @@ public class PlaylistsController : ControllerBase
         };
 
         _db.PlaylistTracks.Add(track);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            return Conflict(new
+            {
+                message = "Track is already in this playlist."
+            });
+        }
 
         return Ok(new
         {

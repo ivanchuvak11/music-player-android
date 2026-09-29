@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using MusicPlayer.Api.Infrastructure;
 using MusicPlayer.Api.Services;
 
 namespace MusicPlayer.Api.Controllers;
@@ -20,7 +22,8 @@ public class JamendoController : ControllerBase
     [HttpGet("search")]
     public async Task<IActionResult> Search(
         [FromQuery] string q,
-        [FromQuery] int limit = 20)
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(q))
         {
@@ -30,14 +33,16 @@ public class JamendoController : ControllerBase
             });
         }
 
-        var tracks = await _jamendo.SearchAsync(q, limit);
+        var tracks = await _jamendo.SearchAsync(q, limit, cancellationToken);
 
         return Ok(tracks);
     }
 
     // GET /api/jamendo/tracks/{id}
     [HttpGet("tracks/{id}")]
-    public async Task<IActionResult> GetTrack(string id)
+    public async Task<IActionResult> GetTrack(
+        string id,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -47,7 +52,7 @@ public class JamendoController : ControllerBase
             });
         }
 
-        var track = await _jamendo.GetTrackAsync(id);
+        var track = await _jamendo.GetTrackAsync(id, cancellationToken);
 
         if (track is null)
         {
@@ -62,6 +67,7 @@ public class JamendoController : ControllerBase
 
     // GET /api/jamendo/tracks/{id}/stream
     [HttpGet("tracks/{id}/stream")]
+    [EnableRateLimiting("stream")]
     public async Task<IActionResult> Stream(
         string id,
         CancellationToken cancellationToken)
@@ -74,32 +80,25 @@ public class JamendoController : ControllerBase
             });
         }
 
-        var response =
-            await _jamendo.GetStreamAsync(id, cancellationToken);
+        var response = await _jamendo.GetStreamAsync(
+            id,
+            Request.Headers.Range.ToString(),
+            cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
-            var errorContent =
-                await response.Content.ReadAsStringAsync(cancellationToken);
-
+            var statusCode = UpstreamStatusMapper.ToClientStatus(
+                response.StatusCode);
             response.Dispose();
 
             return StatusCode(
-                (int)response.StatusCode,
+                statusCode,
                 new
                 {
-                    message = "Unable to get Jamendo stream.",
-                    details = errorContent
+                    message = "Unable to get Jamendo stream."
                 });
         }
 
-        var stream =
-            await response.Content.ReadAsStreamAsync(cancellationToken);
-
-        var contentType =
-            response.Content.Headers.ContentType?.MediaType
-            ?? "audio/mpeg";
-
-        return File(stream, contentType);
+        return new UpstreamStreamResult(response);
     }
 }

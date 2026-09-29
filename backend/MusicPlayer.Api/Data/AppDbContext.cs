@@ -26,6 +26,86 @@ public class AppDbContext : DbContext
             .HasIndex(u => u.Email)
             .IsUnique();
 
+        modelBuilder.Entity<User>()
+            .Property(u => u.Username)
+            .HasMaxLength(100);
+
+        modelBuilder.Entity<User>()
+            .Property(u => u.Email)
+            .HasMaxLength(320);
+
+        modelBuilder.Entity<User>()
+            .Property(u => u.PasswordHash)
+            .HasMaxLength(1024);
+
+        modelBuilder.Entity<Playlist>()
+            .Property(p => p.Name)
+            .HasMaxLength(200);
+
+        modelBuilder.Entity<PlaylistTrack>()
+            .Property(t => t.Source)
+            .HasMaxLength(32);
+
+        modelBuilder.Entity<PlaylistTrack>()
+            .Property(t => t.ExternalId)
+            .HasMaxLength(256);
+
+        modelBuilder.Entity<PlaylistTrack>()
+            .Property(t => t.Title)
+            .HasMaxLength(500);
+
+        modelBuilder.Entity<PlaylistTrack>()
+            .Property(t => t.Artist)
+            .HasMaxLength(300);
+
+        modelBuilder.Entity<PlaylistTrack>()
+            .Property(t => t.ArtworkUrl)
+            .HasMaxLength(2048);
+
+        modelBuilder.Entity<FavoriteTrack>()
+            .Property(f => f.Source)
+            .HasMaxLength(32);
+
+        modelBuilder.Entity<FavoriteTrack>()
+            .Property(f => f.ExternalId)
+            .HasMaxLength(256);
+
+        modelBuilder.Entity<FavoriteTrack>()
+            .Property(f => f.Title)
+            .HasMaxLength(500);
+
+        modelBuilder.Entity<FavoriteTrack>()
+            .Property(f => f.Artist)
+            .HasMaxLength(300);
+
+        modelBuilder.Entity<FavoriteTrack>()
+            .Property(f => f.ArtworkUrl)
+            .HasMaxLength(2048);
+
+        modelBuilder.Entity<FavoriteRadioStation>()
+            .Property(r => r.StationId)
+            .HasMaxLength(128);
+
+        modelBuilder.Entity<FavoriteRadioStation>()
+            .Property(r => r.Name)
+            .HasMaxLength(500);
+
+        modelBuilder.Entity<FavoriteRadioStation>()
+            .Property(r => r.StreamUrl)
+            .HasMaxLength(2048);
+
+        modelBuilder.Entity<FavoriteRadioStation>()
+            .Property(r => r.LogoUrl)
+            .HasMaxLength(2048);
+
+        modelBuilder.Entity<FavoriteRadioStation>()
+            .Property(r => r.Country)
+            .HasMaxLength(128);
+
+        modelBuilder.Entity<FavoriteRadioStation>()
+            .Property(r => r.Genre)
+            .HasMaxLength(500);
+
         // User -> Playlists
         modelBuilder.Entity<Playlist>()
             .HasOne(p => p.User)
