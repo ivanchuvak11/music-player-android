@@ -83,6 +83,7 @@ fun PlayerCoreScreen() {
     var isServerConfigExpanded by remember { mutableStateOf(false) }
     var isEqualizerExpanded by remember { mutableStateOf(false) }
     var cachedFilterQuery by remember { mutableStateOf("") }
+    var localSearchQuery by remember { mutableStateOf("") }
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
@@ -95,7 +96,6 @@ fun PlayerCoreScreen() {
     ) { isGranted ->
         if (isGranted) {
             viewModel.loadLocalTracks()
-            Toast.makeText(context, "Сканування запущено...", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(context, "Дозвіл на читання аудіо відхилено", Toast.LENGTH_LONG).show()
         }
@@ -694,37 +694,54 @@ fun PlayerCoreScreen() {
             }
         }
 
-        // Section: Local Tracks Header
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
+        // List of found local tracks with instant live search
+        if (localTracks.isNotEmpty()) {
+            val filteredLocalTracks = if (localSearchQuery.isBlank()) {
+                localTracks
+            } else {
+                localTracks.filter {
+                    it.title.contains(localSearchQuery.trim(), ignoreCase = true) ||
+                    it.artist.contains(localSearchQuery.trim(), ignoreCase = true)
+                }
+            }
+
+            item {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "📱 Музика з пам'яті телефону (автосканування увімкнено):",
+                        text = "📱 Музика на пристрої (${filteredLocalTracks.size}${if (localSearchQuery.isNotBlank()) " із ${localTracks.size}" else ""}):",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.primary
                     )
-                    Text(
-                        text = "Нові завантажені треки додаються автоматично. Голосові з месенджерів та звуки <20с відфільтровано.",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    OutlinedTextField(
+                        value = localSearchQuery,
+                        onValueChange = { localSearchQuery = it },
+                        placeholder = { Text("🔍 Пошук серед локальних пісень...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        trailingIcon = {
+                            if (localSearchQuery.isNotEmpty()) {
+                                IconButton(onClick = { localSearchQuery = "" }) {
+                                    Text("✕", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     )
                 }
             }
-        }
 
-        // List of found local tracks (All items)
-        if (localTracks.isNotEmpty()) {
-            item {
-                Text(
-                    text = "Знайдено музичних треків: ${localTracks.size}",
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
-                )
+            if (filteredLocalTracks.isEmpty()) {
+                item {
+                    Text(
+                        text = "Нічого не знайдено за запитом «$localSearchQuery»",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+                    )
+                }
             }
-            items(localTracks) { track ->
+
+            items(filteredLocalTracks) { track ->
                 TrackItemRow(
                     track = track,
                     onPlay = { viewModel.playLocalTrack(track) },
