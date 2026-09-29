@@ -120,32 +120,44 @@ fun PlayerCoreScreen() {
         }
     }
 
-    // Permission launcher for scanning local audio
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
+    // Multiple permissions launcher (Audio, Notifications, Bluetooth)
+    val multiplePermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissionsMap ->
+        val audioGranted = permissionsMap.entries.firstOrNull { it.key.contains("AUDIO") || it.key.contains("STORAGE") }?.value ?: false
+        if (audioGranted) {
             viewModel.loadLocalTracks()
-        } else {
-            Toast.makeText(context, "Дозвіл на читання аудіо відхилено", Toast.LENGTH_LONG).show()
         }
     }
 
     LaunchedEffect(Unit) {
-        val perm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val permissionsToRequest = mutableListOf<String>()
+
+        val audioPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_AUDIO
         } else {
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
-        val isGranted = androidx.core.content.ContextCompat.checkSelfPermission(
-            context,
-            perm
-        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-
-        if (isGranted) {
-            viewModel.loadLocalTracks()
+        if (androidx.core.content.ContextCompat.checkSelfPermission(context, audioPerm) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            permissionsToRequest.add(audioPerm)
         } else {
-            permissionLauncher.launch(perm)
+            viewModel.loadLocalTracks()
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            multiplePermissionsLauncher.launch(permissionsToRequest.toTypedArray())
         }
     }
 

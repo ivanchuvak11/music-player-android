@@ -96,10 +96,6 @@ class MusicPlayerService : MediaSessionService() {
                 session: MediaSession,
                 controller: MediaSession.ControllerInfo
             ): MediaSession.ConnectionResult {
-                val availableSessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
-                val availablePlayerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-
-                // If controller is system/auto/bluetooth/self, grant full control
                 val callerPackage = controller.packageName
                 val isTrusted = callerPackage == packageName ||
                         callerPackage == "com.android.systemui" ||
@@ -108,15 +104,30 @@ class MusicPlayerService : MediaSessionService() {
                         session.isMediaNotificationController(controller)
 
                 return if (isTrusted) {
+                    val availableSessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                    val availablePlayerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                     MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                         .setAvailableSessionCommands(availableSessionCommands.build())
                         .setAvailablePlayerCommands(availablePlayerCommands.build())
                         .build()
                 } else {
-                    // For third-party untrusted controllers, provide standard safe playback controls only
+                    // For third-party untrusted controllers, provide only PLAY, PAUSE, SEEK, NEXT, PREVIOUS
+                    val safePlayerCommands = androidx.media3.common.Player.Commands.Builder()
+                        .addAll(
+                            androidx.media3.common.Player.COMMAND_PLAY_PAUSE,
+                            androidx.media3.common.Player.COMMAND_SEEK_TO_NEXT,
+                            androidx.media3.common.Player.COMMAND_SEEK_TO_PREVIOUS,
+                            androidx.media3.common.Player.COMMAND_SEEK_BACK,
+                            androidx.media3.common.Player.COMMAND_SEEK_FORWARD,
+                            androidx.media3.common.Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+                            androidx.media3.common.Player.COMMAND_GET_CURRENT_MEDIA_ITEM,
+                            androidx.media3.common.Player.COMMAND_GET_TIMELINE
+                        )
+                        .build()
+
                     MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                        .setAvailableSessionCommands(availableSessionCommands.build())
-                        .setAvailablePlayerCommands(availablePlayerCommands.build())
+                        .setAvailableSessionCommands(androidx.media3.session.SessionCommands.EMPTY)
+                        .setAvailablePlayerCommands(safePlayerCommands)
                         .build()
                 }
             }

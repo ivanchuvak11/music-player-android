@@ -935,12 +935,23 @@ class MainPlayerViewModel(
     fun cacheTrack(track: AudioTrack) {
         viewModelScope.launch {
             try {
+                // If it's a remote URL, download it to private app storage first
+                val localFile = if (!track.isLocal && track.audioUrl.startsWith("http")) {
+                    com.musicplayer.android.core.audio.TrackDownloadManager.downloadTrackToPrivateStorage(
+                        context = getApplication(),
+                        trackId = track.id,
+                        audioUrl = track.audioUrl
+                    )
+                } else null
+
+                val localPath = localFile?.absolutePath
+
                 db.cachedTrackDao().insertTrack(
                     CachedTrackEntity(
                         id = track.id,
                         title = track.title,
                         artist = track.artist,
-                        localFilePath = null,
+                        localFilePath = localPath,
                         originalUrl = track.audioUrl,
                         artworkUrl = track.artworkUrl, // Fix #14: save artworkUrl
                         durationMs = track.durationMs,
@@ -956,6 +967,12 @@ class MainPlayerViewModel(
     fun removeCachedTrack(trackId: String) {
         viewModelScope.launch {
             try {
+                val existing = db.cachedTrackDao().getTrackById(trackId)
+                if (existing?.localFilePath != null) {
+                    com.musicplayer.android.core.audio.TrackDownloadManager.deleteDownloadedTrack(
+                        localFilePath = existing.localFilePath
+                    )
+                }
                 db.cachedTrackDao().deleteTrack(trackId)
             } catch (e: Exception) {
                 e.printStackTrace()

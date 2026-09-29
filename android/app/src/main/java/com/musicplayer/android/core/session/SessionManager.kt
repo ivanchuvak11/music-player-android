@@ -14,40 +14,21 @@ import com.musicplayer.android.core.audio.AudioTrack
  */
 class SessionManager(context: Context) {
 
-    private val appContext = context.applicationContext
-    private val prefs: SharedPreferences = createEncryptedOrNormalPrefs(appContext)
+    private val appContext: Context = context.applicationContext
+    private val isEncrypted: Boolean
+    private val prefs: SharedPreferences
+
+    init {
+        val (p, encrypted) = createPrefs(appContext)
+        prefs = p
+        isEncrypted = encrypted
+    }
 
     companion object {
         private const val TAG = "SessionManager"
         private const val PREFS_NAME = "music_player_session_prefs"
         private const val SECURE_PREFS_NAME = "music_player_secure_prefs"
         private const val KEY_AUTH_TOKEN = "key_auth_token"
-
-        private fun createEncryptedOrNormalPrefs(ctx: Context): SharedPreferences {
-            return try {
-                val masterKey = MasterKey.Builder(ctx)
-                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                    .build()
-                EncryptedSharedPreferences.create(
-                    ctx,
-                    SECURE_PREFS_NAME,
-                    masterKey,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                ).also { securePrefs ->
-                    // One-time automatic migration from plain old prefs if present
-                    val oldPrefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                    val oldToken = oldPrefs.getString(KEY_AUTH_TOKEN, null)
-                    if (!oldToken.isNullOrBlank() && !securePrefs.contains(KEY_AUTH_TOKEN)) {
-                        securePrefs.edit().putString(KEY_AUTH_TOKEN, oldToken).apply()
-                        oldPrefs.edit().remove(KEY_AUTH_TOKEN).apply()
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "EncryptedSharedPreferences unavailable, falling back to standard SharedPreferences", e)
-                ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            }
-        }
         private const val KEY_USER_ID = "key_user_id"
         private const val KEY_USERNAME = "key_username"
         private const val KEY_EMAIL = "key_email"
@@ -66,7 +47,7 @@ class SessionManager(context: Context) {
         private const val KEY_LAST_POSITION_MS = "key_last_position_ms"
 
         val DEFAULT_BASE_URL: String
-            get() = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL
+            get() = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL
 
         @Volatile
         private var INSTANCE: SessionManager? = null
@@ -78,7 +59,50 @@ class SessionManager(context: Context) {
                 }
             }
         }
+
+        private fun createPrefs(ctx: Context): Pair<SharedPreferences, Boolean> {
+            return try {
+                val masterKey = MasterKey.Builder(ctx)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                val securePrefs = EncryptedSharedPreferences.create(
+                    ctx,
+                    SECURE_PREFS_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+
+                // One-time automatic migration: transfer JWT, username, email, server URL, and settings
+                val oldPrefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                val allOld = oldPrefs.all
+                if (allOld.isNotEmpty()) {
+                    val editor = securePrefs.edit()
+                    allOld.forEach { (k, v) ->
+                        if (!securePrefs.contains(k)) {
+                            when (v) {
+                                is String -> editor.putString(k, v)
+                                is Boolean -> editor.putBoolean(k, v)
+                                is Int -> editor.putInt(k, v)
+                                is Long -> editor.putLong(k, v)
+                                is Float -> editor.putFloat(k, v)
+                            }
+                        }
+                    }
+                    editor.apply()
+                    oldPrefs.edit().clear().apply()
+                }
+
+                Pair(securePrefs, true)
+            } catch (e: Exception) {
+                Log.e(TAG, "Keystore/EncryptedSharedPreferences unavailable: ${e.message}", e)
+                // Fallback to standard SharedPreferences for non-sensitive preferences only; token won't be stored in plaintext
+                Pair(ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE), false)
+            }
+        }
     }
+
+    fun isStorageEncrypted(): Boolean = isEncrypted
 
     fun saveSession(
         token: String,
@@ -86,6 +110,10 @@ class SessionManager(context: Context) {
         username: String? = null,
         email: String? = null
     ) {
+        if (!isEncrypted) {
+            Log.e(TAG, "Cannot save auth token: Hardware encryption is unavailable.")
+            return
+        }
         prefs.edit().apply {
             putString(KEY_AUTH_TOKEN, token)
             if (userId != null) putInt(KEY_USER_ID, userId) else remove(KEY_USER_ID)
@@ -96,6 +124,7 @@ class SessionManager(context: Context) {
     }
 
     fun getToken(): String? {
+        if (!isEncrypted) return null
         return prefs.getString(KEY_AUTH_TOKEN, null)
     }
 
@@ -123,6 +152,8 @@ class SessionManager(context: Context) {
             remove(KEY_EMAIL)
             apply()
         }
+        // Also wipe unencrypted old storage if anything lingered
+        appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().clear().apply()
     }
 
     // Server Configuration
@@ -132,6 +163,16 @@ class SessionManager(context: Context) {
 
     fun saveBaseUrl(url: String) {
         val normalized = if (url.endsWith("/")) url else "$url/"
+        val isDebug = try {
+            (appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        } catch (e: Exception) {
+            false
+        }
+        // In release builds, prevent insecure cleartext HTTP URLs
+        if (!isDebug && !normalized.startsWith("https://")) {
+            Log.w(TAG, "Rejecting insecure cleartext HTTP URL in release build: $normalized")
+            return
+        }
         if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) return
         prefs.edit().putString(KEY_BASE_URL, normalized).apply()
     }
