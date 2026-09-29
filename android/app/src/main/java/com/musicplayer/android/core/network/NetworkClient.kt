@@ -38,8 +38,8 @@ class AuthInterceptor : Interceptor {
 }
 
 object NetworkClient {
-    // 10.0.2.2 points to localhost of host machine in Android Emulator (port 5116)
-    const val DEFAULT_BASE_URL = "http://10.0.2.2:5116/"
+    val DEFAULT_BASE_URL: String
+        get() = ServerConfig.DEFAULT_LOCAL_BASE_URL
 
     val authInterceptor = AuthInterceptor()
 

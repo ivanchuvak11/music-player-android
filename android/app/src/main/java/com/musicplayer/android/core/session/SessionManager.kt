@@ -2,20 +2,52 @@ package com.musicplayer.android.core.session
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
+import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.musicplayer.android.core.audio.AudioTrack
 
 /**
- * Manages persistent user session, authentication token, playback preferences,
- * and equalizer state stored safely in SharedPreferences.
+ * Manages persistent user session, authentication token (encrypted via Keystore),
+ * playback preferences, and equalizer state.
  */
 class SessionManager(context: Context) {
 
-    private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs: SharedPreferences = createEncryptedOrNormalPrefs(appContext)
 
     companion object {
+        private const val TAG = "SessionManager"
         private const val PREFS_NAME = "music_player_session_prefs"
+        private const val SECURE_PREFS_NAME = "music_player_secure_prefs"
         private const val KEY_AUTH_TOKEN = "key_auth_token"
+
+        private fun createEncryptedOrNormalPrefs(ctx: Context): SharedPreferences {
+            return try {
+                val masterKey = MasterKey.Builder(ctx)
+                    .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                    .build()
+                EncryptedSharedPreferences.create(
+                    ctx,
+                    SECURE_PREFS_NAME,
+                    masterKey,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                ).also { securePrefs ->
+                    // One-time automatic migration from plain old prefs if present
+                    val oldPrefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    val oldToken = oldPrefs.getString(KEY_AUTH_TOKEN, null)
+                    if (!oldToken.isNullOrBlank() && !securePrefs.contains(KEY_AUTH_TOKEN)) {
+                        securePrefs.edit().putString(KEY_AUTH_TOKEN, oldToken).apply()
+                        oldPrefs.edit().remove(KEY_AUTH_TOKEN).apply()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "EncryptedSharedPreferences unavailable, falling back to standard SharedPreferences", e)
+                ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            }
+        }
         private const val KEY_USER_ID = "key_user_id"
         private const val KEY_USERNAME = "key_username"
         private const val KEY_EMAIL = "key_email"
@@ -33,7 +65,8 @@ class SessionManager(context: Context) {
         private const val KEY_LAST_TRACK_ID = "key_last_track_id"
         private const val KEY_LAST_POSITION_MS = "key_last_position_ms"
 
-        const val DEFAULT_BASE_URL = "http://10.0.2.2:5116/"
+        val DEFAULT_BASE_URL: String
+            get() = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL
 
         @Volatile
         private var INSTANCE: SessionManager? = null

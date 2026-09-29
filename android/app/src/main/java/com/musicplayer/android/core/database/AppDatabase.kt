@@ -214,9 +214,17 @@ abstract class AppDatabase : RoomDatabase() {
                         MIGRATION_5_6,
                         MIGRATION_5_7,
                         MIGRATION_6_7
-                    )
-                    .fallbackToDestructiveMigration()
-                    .fallbackToDestructiveMigrationOnDowngrade()
+                    ).apply {
+                        val isDebug = try {
+                            (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                        } catch (e: Exception) {
+                            false
+                        }
+                        if (isDebug) {
+                            fallbackToDestructiveMigration()
+                            fallbackToDestructiveMigrationOnDowngrade()
+                        }
+                    }
                     .addCallback(object : Callback() {
                         override fun onOpen(db: SupportSQLiteDatabase) {
                             db.execSQL("PRAGMA foreign_keys = ON")
