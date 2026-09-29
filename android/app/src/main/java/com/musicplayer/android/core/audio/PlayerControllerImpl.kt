@@ -93,6 +93,10 @@ class PlayerControllerImpl(
                 updateState()
             }
 
+            override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
+                updateState()
+            }
+
             override fun onPlayerError(error: PlaybackException) {
                 val isNetworkError = error.errorCode in listOf(
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
@@ -177,7 +181,8 @@ class PlayerControllerImpl(
             hasNext = controller.hasNextMediaItem(),
             hasPrevious = controller.hasPreviousMediaItem(),
             shuffleModeEnabled = controller.shuffleModeEnabled,
-            repeatMode = mappedRepeatMode
+            repeatMode = mappedRepeatMode,
+            playbackSpeed = controller.playbackParameters.speed
         )
     }
 
@@ -306,6 +311,7 @@ class PlayerControllerImpl(
     override fun setPlaybackSpeed(speed: Float) {
         val clampedSpeed = speed.coerceIn(0.25f, 3.0f)
         mediaController?.setPlaybackSpeed(clampedSpeed)
+        _playbackState.value = _playbackState.value.copy(playbackSpeed = clampedSpeed)
     }
 
     override fun addToQueue(track: AudioTrack) {

@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerCoreScreen() {
     val context = LocalContext.current
@@ -80,7 +81,10 @@ fun PlayerCoreScreen() {
     val playHistory by viewModel.playHistory.collectAsState()
     val localPlaylists by viewModel.localPlaylists.collectAsState()
 
-    var trackToAddToPlaylist by remember { mutableStateOf<AudioTrack?>(null) }
+    var tracksToAddToPlaylist by remember { mutableStateOf<List<AudioTrack>?>(null) }
+    var isMultiSelectMode by remember { mutableStateOf(false) }
+    var selectedTracks by remember { mutableStateOf(setOf<AudioTrack>()) }
+    var dialogNewPlaylistName by remember { mutableStateOf("") }
     var expandedPlaylistId by remember { mutableStateOf<Long?>(null) }
     var currentRadioIndex by remember { mutableStateOf(0) }
     var audioCacheSizeBytes by remember { mutableStateOf(viewModel.getAudioCacheSizeBytes()) }
@@ -91,6 +95,18 @@ fun PlayerCoreScreen() {
     var emailInput by remember { mutableStateOf("") }
     var passwordInput by remember { mutableStateOf("") }
     var newPlaylistName by remember { mutableStateOf("") }
+    var showNowPlayingSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(playbackState.currentTrack) {
+        val track = playbackState.currentTrack
+        if (track != null && track.isLiveStream) {
+            val stations = radioStationsByCountry.ifEmpty { MainPlayerViewModel.DEFAULT_UA_RADIO_STATIONS }
+            val idx = stations.indexOfFirst { it.name == track.title }
+            if (idx >= 0) {
+                currentRadioIndex = idx
+            }
+        }
+    }
 
     // Permission launcher for scanning local audio
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -134,7 +150,7 @@ fun PlayerCoreScreen() {
         } else {
             Toast.makeText(
                 context,
-                "📡 Немає зв'язку з інтернетом. Ви можете слухати музику з пристрою чи збережений Room-кеш офлайн!",
+                "📡 Немає зв'язку з інтернетом. Ви можете слухати музику з пам'яті телефону офлайн!",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -209,7 +225,7 @@ fun PlayerCoreScreen() {
                         Text("📡", fontSize = 18.sp)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Ви зараз офлайн. Треки з пам'яті телефону та кеш Room доступні без інтернету!",
+                            text = "Ви зараз офлайн. Треки з пам'яті телефону доступні для прослуховування!",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -218,63 +234,6 @@ fun PlayerCoreScreen() {
             }
         }
 
-        // Server URL Configuration (collapsible for cleaner UI)
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { isServerConfigExpanded = !isServerConfigExpanded },
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "🌐 Сервер: ${serverUrlInput.trimEnd('/')}",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = if (isServerConfigExpanded) "▲ Приховати" else "▼ Змінити",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.secondary,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-
-                    if (isServerConfigExpanded) {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            OutlinedTextField(
-                                value = serverUrlInput,
-                                onValueChange = { serverUrlInput = it },
-                                label = { Text("Base URL сервера") },
-                                modifier = Modifier.weight(1f),
-                                singleLine = true
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(onClick = {
-                                viewModel.setBaseUrl(serverUrlInput)
-                                isServerConfigExpanded = false
-                                Toast.makeText(context, "Сервер оновлено: $serverUrlInput", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Text("ОК")
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         // Active Player Card with Seek Bar
         // Active Player Card with Seek Bar & Memory Resume
@@ -295,9 +254,17 @@ fun PlayerCoreScreen() {
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable {
+                                    if (currentOrRememberedTrack != null) {
+                                        showNowPlayingSheet = true
+                                    }
+                                }
+                        ) {
                             Text(
-                                text = if (playbackState.isPlaying) "Зараз грає:" else if (playbackState.currentTrack != null) "На паузі:" else "Остання пісня:",
+                                text = if (playbackState.isPlaying) "Зараз грає (натисніть ↗):" else if (playbackState.currentTrack != null) "На паузі (натисніть ↗):" else "Остання пісня:",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.primary
@@ -472,10 +439,22 @@ fun PlayerCoreScreen() {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Увімкнути еквалайзер:", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                            Switch(
-                                checked = audioEffectsState.isEnabled,
-                                onCheckedChange = { viewModel.setEqualizerEnabled(it) }
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (audioEffectsState.isEnabled) {
+                                    OutlinedButton(
+                                        onClick = { viewModel.resetEqualizer() },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text("🔄 0 dB", fontSize = 11.sp)
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                Switch(
+                                    checked = audioEffectsState.isEnabled,
+                                    onCheckedChange = { viewModel.setEqualizerEnabled(it) }
+                                )
+                            }
                         }
 
                         if (audioEffectsState.isEnabled) {
@@ -869,7 +848,13 @@ fun PlayerCoreScreen() {
                     TrackItemRow(
                         track = track,
                         onPlay = { viewModel.playLocalTrack(track) },
-                        onAddToPlaylist = { trackToAddToPlaylist = track }
+                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                        onTrackCardClick = {
+                            if (playbackState.currentTrack?.id != track.id) {
+                                viewModel.playLocalTrack(track)
+                            }
+                            showNowPlayingSheet = true
+                        }
                     )
                 }
             }
@@ -920,7 +905,15 @@ fun PlayerCoreScreen() {
                     TrackItemRow(
                         track = track,
                         onPlay = { playOnlineSafely { viewModel.playTrack(track) } },
-                        onAddToPlaylist = { trackToAddToPlaylist = track }
+                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                        onTrackCardClick = {
+                            playOnlineSafely {
+                                if (playbackState.currentTrack?.id != track.id) {
+                                    viewModel.playTrack(track)
+                                }
+                                showNowPlayingSheet = true
+                            }
+                        }
                     )
                 }
             }
@@ -938,88 +931,96 @@ fun PlayerCoreScreen() {
             // Default on-device music list when not searching
             if (localTracks.isNotEmpty()) {
                 item {
-                    Text(
-                        text = "📱 Музика на пристрої (${localTracks.size}):",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-                items(localTracks) { track ->
-                    TrackItemRow(
-                        track = track,
-                        onPlay = { viewModel.playLocalTrack(track) },
-                        onAddToPlaylist = { trackToAddToPlaylist = track }
-                    )
-                }
-            }
-        }
-
-        // Section: Room Offline Cache
-        item {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text(
-                        text = "💾 Офлайн-кеш Room DB (${cachedTracks.size} збережено):",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val cacheMb = audioCacheSizeBytes / (1024 * 1024)
                         Text(
-                            text = "Дисковий кеш: $cacheMb МБ",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = "📱 Музика на пристрої (${localTracks.size}):",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        OutlinedButton(onClick = {
-                            viewModel.clearAudioCache()
-                            audioCacheSizeBytes = viewModel.getAudioCacheSizeBytes()
-                            Toast.makeText(context, "Кеш очищено", Toast.LENGTH_SHORT).show()
-                        }) {
-                            Text("🧹 Очистити кеш", fontSize = 11.sp)
+                        OutlinedButton(
+                            onClick = {
+                                isMultiSelectMode = !isMultiSelectMode
+                                if (!isMultiSelectMode) selectedTracks = emptySet()
+                            },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text(if (isMultiSelectMode) "✕ Закрити" else "☑ Вибрати кілька", fontSize = 11.sp)
                         }
                     }
-                    if (cachedTracks.isEmpty()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Поки порожньо. Натисніть кнопку «+ Кеш» біля будь-якої пісні.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                }
+
+                if (isMultiSelectMode) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Обрано: ${selectedTracks.size}",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(onClick = {
+                                        selectedTracks = if (selectedTracks.size == localTracks.size) emptySet() else localTracks.toSet()
+                                    }) {
+                                        Text(if (selectedTracks.size == localTracks.size) "Зняти всі" else "Всі", fontSize = 11.sp)
+                                    }
+                                    Button(
+                                        enabled = selectedTracks.isNotEmpty(),
+                                        onClick = {
+                                            tracksToAddToPlaylist = selectedTracks.toList()
+                                        }
+                                    ) {
+                                        Text("📁+ Додати (${selectedTracks.size})", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+                        }
                     }
+                }
+
+                items(localTracks) { track ->
+                    val isSelected = selectedTracks.contains(track)
+                    TrackItemRow(
+                        track = track,
+                        onPlay = {
+                            if (isMultiSelectMode) {
+                                selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
+                            } else {
+                                viewModel.playLocalTrack(track)
+                            }
+                        },
+                        isSelectionMode = isMultiSelectMode,
+                        isSelected = isSelected,
+                        onToggleSelect = {
+                            selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
+                        },
+                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                        onTrackCardClick = {
+                            if (playbackState.currentTrack?.id != track.id) {
+                                viewModel.playLocalTrack(track)
+                            }
+                            showNowPlayingSheet = true
+                        }
+                    )
                 }
             }
-        }
-
-        items(cachedTracks) { cached ->
-            CachedTrackRow(
-                cached = cached,
-                onPlay = {
-                    val tracks = cachedTracks.map { c ->
-                        AudioTrack(
-                            id = c.id,
-                            title = c.title,
-                            artist = c.artist,
-                            audioUrl = c.localFilePath ?: c.originalUrl,
-                            durationMs = c.durationMs,
-                            isLocal = c.localFilePath != null
-                        )
-                    }
-                    val index = cachedTracks.indexOfFirst { it.id == cached.id }.coerceAtLeast(0)
-                    viewModel.playQueue(tracks, index)
-                },
-                onDelete = {
-                    viewModel.removeCachedTrack(cached.id)
-                }
-            )
         }
 
         // Section: Recently Played History (Історія прослуховувань)
@@ -1195,37 +1196,195 @@ fun PlayerCoreScreen() {
             }
         }
 
+        // Section: System Settings & Storage Cache
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { isServerConfigExpanded = !isServerConfigExpanded },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "⚙️ Налаштування та Пам'ять",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            val cacheMb = audioCacheSizeBytes / (1024 * 1024)
+                            Text(
+                                text = "Кеш аудіо: $cacheMb МБ • Сервер: ${serverUrlInput.trimEnd('/')}",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Text(
+                            text = if (isServerConfigExpanded) "▲ Згорнути" else "▼ Відкрити",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.secondary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    if (isServerConfigExpanded) {
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Cache Cleaner Row
+                        val cacheMb = audioCacheSizeBytes / (1024 * 1024)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "💾 Тимчасовий кеш аудіо:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "$cacheMb МБ (ExoPlayer авто-кешування треків)",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.clearAudioCache()
+                                    audioCacheSizeBytes = viewModel.getAudioCacheSizeBytes()
+                                    Toast.makeText(context, "Кеш аудіо успішно очищено!", Toast.LENGTH_SHORT).show()
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                Text("🧹 Очистити", fontSize = 11.sp)
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Server URL Row
+                        Text(
+                            text = "🌐 Адреса бекенд-сервера (API):",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = serverUrlInput,
+                                onValueChange = { serverUrlInput = it },
+                                label = { Text("Base URL сервера", fontSize = 11.sp) },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Button(onClick = {
+                                viewModel.setBaseUrl(serverUrlInput)
+                                Toast.makeText(context, "Сервер оновлено: $serverUrlInput", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Text("ОК")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item {
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
 
-    if (trackToAddToPlaylist != null) {
-        val track = trackToAddToPlaylist!!
+    if (tracksToAddToPlaylist != null) {
+        val tracks = tracksToAddToPlaylist!!
         AlertDialog(
-            onDismissRequest = { trackToAddToPlaylist = null },
-            title = { Text("📁 Додати в плейліст") },
+            onDismissRequest = {
+                tracksToAddToPlaylist = null
+                dialogNewPlaylistName = ""
+            },
+            title = {
+                Text(if (tracks.size == 1) "📁 Додати до плейліста" else "📁 Додати ${tracks.size} пісень до плейліста")
+            },
             text = {
-                if (localPlaylists.isEmpty()) {
-                    Text("У вас ще немає створених плейлістів. Створіть новий плейліст у розділі «Мої плейлісти» нижче.")
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (tracks.size == 1) {
                         Text(
-                            text = "Пісня: ${track.title}",
+                            text = "Пісня: ${tracks.first().title}",
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 13.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                    } else {
+                        Text(
+                            text = "Обрано ${tracks.size} пісень для додавання",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    Text("Створити новий плейліст:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = dialogNewPlaylistName,
+                            onValueChange = { dialogNewPlaylistName = it },
+                            placeholder = { Text("Назва нового...", fontSize = 12.sp) },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        Button(
+                            onClick = {
+                                if (dialogNewPlaylistName.isNotBlank()) {
+                                    val name = dialogNewPlaylistName.trim()
+                                    viewModel.createLocalPlaylistWithTracks(name, tracks) {
+                                        Toast.makeText(context, "Створено «$name» і додано ${tracks.size} пісень!", Toast.LENGTH_SHORT).show()
+                                    }
+                                    dialogNewPlaylistName = ""
+                                    tracksToAddToPlaylist = null
+                                    isMultiSelectMode = false
+                                    selectedTracks = emptySet()
+                                } else {
+                                    Toast.makeText(context, "Введіть назву плейліста", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        ) {
+                            Text("➕ Додати", fontSize = 11.sp)
+                        }
+                    }
+
+                    if (localPlaylists.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("Оберіть плейліст:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Або обрати існуючий плейліст:", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         localPlaylists.forEach { pl ->
                             OutlinedButton(
                                 modifier = Modifier.fillMaxWidth(),
                                 onClick = {
-                                    viewModel.addTrackToLocalPlaylist(pl.id, track)
-                                    Toast.makeText(context, "Додано до «${pl.name}»", Toast.LENGTH_SHORT).show()
-                                    trackToAddToPlaylist = null
+                                    viewModel.addTracksToLocalPlaylist(pl.id, tracks)
+                                    val msg = if (tracks.size == 1) "Додано до «${pl.name}»" else "Додано ${tracks.size} пісень до «${pl.name}»"
+                                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    tracksToAddToPlaylist = null
+                                    isMultiSelectMode = false
+                                    selectedTracks = emptySet()
                                 }
                             ) {
                                 Text("📁 ${pl.name}")
@@ -1235,11 +1394,192 @@ fun PlayerCoreScreen() {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { trackToAddToPlaylist = null }) {
+                TextButton(onClick = {
+                    tracksToAddToPlaylist = null
+                    dialogNewPlaylistName = ""
+                }) {
                     Text("Закрити")
                 }
             }
         )
+    }
+
+    // 🎵 Now Playing / Track Detail Bottom Sheet
+    if (showNowPlayingSheet) {
+        val lastSession = remember { viewModel.getLastPlayedTrack() }
+        val activeTrack = playbackState.currentTrack ?: lastSession?.first
+        if (activeTrack != null) {
+            val totalDuration = if (playbackState.durationMs > 0L) {
+                playbackState.durationMs
+            } else {
+                activeTrack.durationMs
+            }
+            var sheetSeekingPosition by remember { mutableStateOf<Float?>(null) }
+            val currentPos = sheetSeekingPosition ?: (
+                if (playbackState.currentTrack != null) playbackState.currentPositionMs.toFloat()
+                else (lastSession?.second ?: 0L).toFloat()
+            )
+            val isFav = localFavorites.any { it.id == activeTrack.id }
+
+            ModalBottomSheet(
+                onDismissRequest = { showNowPlayingSheet = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    // Album Art Placeholder Card
+                    Card(
+                        modifier = Modifier
+                            .size(160.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                text = if (activeTrack.isLiveStream) "📻" else "🎵",
+                                fontSize = 64.sp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Track Title & Favorite Button Row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = activeTrack.title,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = activeTrack.artist,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        IconButton(onClick = { viewModel.toggleLocalFavorite(activeTrack) }) {
+                            Text(if (isFav) "❤️" else "🤍", fontSize = 26.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Seek Slider
+                    if (totalDuration > 0L) {
+                        Slider(
+                            value = currentPos.coerceIn(0f, totalDuration.toFloat()),
+                            valueRange = 0f..totalDuration.toFloat(),
+                            onValueChange = { sheetSeekingPosition = it },
+                            onValueChangeFinished = {
+                                sheetSeekingPosition?.let { viewModel.seekTo(it.toLong()) }
+                                sheetSeekingPosition = null
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            val displayedPos = sheetSeekingPosition?.toLong() ?: (
+                                if (playbackState.currentTrack != null) playbackState.currentPositionMs
+                                else (lastSession?.second ?: 0L)
+                            )
+                            Text(formatDuration(displayedPos), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(formatDuration(totalDuration), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Playback Controls (Prev, Play/Pause, Next)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = { viewModel.playPrevious() },
+                            modifier = Modifier.size(52.dp)
+                        ) {
+                            Text("⏮", fontSize = 28.sp)
+                        }
+
+                        FilledIconButton(
+                            onClick = {
+                                if (playbackState.isPlaying) {
+                                    viewModel.pause()
+                                } else {
+                                    viewModel.play()
+                                }
+                            },
+                            modifier = Modifier.size(64.dp)
+                        ) {
+                            Text(if (playbackState.isPlaying) "⏸" else "▶", fontSize = 30.sp)
+                        }
+
+                        IconButton(
+                            onClick = { viewModel.playNext() },
+                            modifier = Modifier.size(52.dp)
+                        ) {
+                            Text("⏭", fontSize = 28.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Modes: Shuffle, Repeat & Add to Playlist
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = { viewModel.toggleShuffle() },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text(if (playbackState.shuffleModeEnabled) "🔀 Shuffle: ON" else "🔀 Shuffle: OFF", fontSize = 12.sp)
+                        }
+
+                        OutlinedButton(
+                            onClick = { viewModel.cycleRepeatMode() },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            val rep = when (playbackState.repeatMode) {
+                                PlaybackState.REPEAT_MODE_ONE -> "🔂 Повтор: 1"
+                                PlaybackState.REPEAT_MODE_ALL -> "🔁 Повтор: Всі"
+                                else -> "🔁 Повтор: Вимк"
+                            }
+                            Text(rep, fontSize = 12.sp)
+                        }
+
+                        Button(
+                            onClick = {
+                                tracksToAddToPlaylist = listOf(activeTrack)
+                            },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                        ) {
+                            Text("📁+ Додати", fontSize = 12.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(24.dp))
+                }
+            }
+        }
     }
 }
 
@@ -1247,20 +1587,54 @@ fun PlayerCoreScreen() {
 fun TrackItemRow(
     track: AudioTrack,
     onPlay: () -> Unit,
-    onAddToPlaylist: (() -> Unit)? = null
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelect: (() -> Unit)? = null,
+    onAddToPlaylist: (() -> Unit)? = null,
+    onTrackCardClick: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onPlay() },
+            .clickable {
+                if (isSelectionMode && onToggleSelect != null) {
+                    onToggleSelect()
+                } else if (onTrackCardClick != null) {
+                    onTrackCardClick()
+                } else {
+                    onPlay()
+                }
+            },
         shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+            else MaterialTheme.colorScheme.surface
+        )
     ) {
         Row(
             modifier = Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
+            if (isSelectionMode) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = { onToggleSelect?.invoke() }
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable {
+                        if (isSelectionMode && onToggleSelect != null) {
+                            onToggleSelect()
+                        } else if (onTrackCardClick != null) {
+                            onTrackCardClick()
+                        } else {
+                            onPlay()
+                        }
+                    }
+            ) {
                 Text(
                     text = track.title,
                     fontWeight = FontWeight.Medium,
@@ -1275,14 +1649,16 @@ fun TrackItemRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            if (onAddToPlaylist != null) {
-                OutlinedButton(onClick = onAddToPlaylist) {
-                    Text("📁+", fontSize = 11.sp)
+            if (!isSelectionMode) {
+                if (onAddToPlaylist != null) {
+                    OutlinedButton(onClick = onAddToPlaylist) {
+                        Text("📁+", fontSize = 11.sp)
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
                 }
-                Spacer(modifier = Modifier.width(6.dp))
-            }
-            Button(onClick = onPlay) {
-                Text("▶")
+                Button(onClick = onPlay) {
+                    Text("▶")
+                }
             }
         }
     }

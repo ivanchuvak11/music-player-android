@@ -291,8 +291,35 @@ class MainPlayerViewModel(
     fun getLastPlayedTrack(): Pair<AudioTrack, Long>? = sessionManager.getLastPlayedTrack()
 
     fun pause() = playerController.pause()
-    fun playNext() = playerController.playNext()
-    fun playPrevious() = playerController.playPrevious()
+
+    fun playNext() {
+        val current = playbackState.value.currentTrack
+        if (current?.isLiveStream == true) {
+            val stations = _radioStationsByCountry.value.ifEmpty { DEFAULT_UA_RADIO_STATIONS }
+            if (stations.isNotEmpty()) {
+                val currentIndex = stations.indexOfFirst { it.name == current.title }
+                val nextIndex = if (currentIndex >= 0) (currentIndex + 1) % stations.size else 0
+                playRadioStation(stations[nextIndex])
+                return
+            }
+        }
+        playerController.playNext()
+    }
+
+    fun playPrevious() {
+        val current = playbackState.value.currentTrack
+        if (current?.isLiveStream == true) {
+            val stations = _radioStationsByCountry.value.ifEmpty { DEFAULT_UA_RADIO_STATIONS }
+            if (stations.isNotEmpty()) {
+                val currentIndex = stations.indexOfFirst { it.name == current.title }
+                val prevIndex = if (currentIndex > 0) currentIndex - 1 else stations.size - 1
+                playRadioStation(stations[prevIndex])
+                return
+            }
+        }
+        playerController.playPrevious()
+    }
+
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
 
     fun toggleShuffle() {
@@ -361,7 +388,10 @@ class MainPlayerViewModel(
     }
 
     fun playRadioStation(station: RadioStationDto) {
-        playTrack(AudioTrack.fromRadio(station))
+        val stations = _radioStationsByCountry.value.ifEmpty { DEFAULT_UA_RADIO_STATIONS }
+        val radioTracks = stations.map { AudioTrack.fromRadio(it) }
+        val startIndex = stations.indexOfFirst { it.stationId == station.stationId }.coerceAtLeast(0)
+        playQueue(radioTracks, startIndex)
     }
 
     fun playJamendoTrack(track: JamendoTrackDto) {
@@ -414,6 +444,10 @@ class MainPlayerViewModel(
 
     fun setLoudnessEnhancerGain(gainMb: Int) {
         AudioEffectsManager.setLoudnessEnhancerGain(gainMb)
+    }
+
+    fun resetEqualizer() {
+        AudioEffectsManager.resetToFlat(getApplication())
     }
 
     // Playback Speed & Queue Management
@@ -650,9 +684,14 @@ class MainPlayerViewModel(
     }
 
     fun addTrackToLocalPlaylist(playlistId: Long, track: AudioTrack) {
+        addTracksToLocalPlaylist(playlistId, listOf(track))
+    }
+
+    fun addTracksToLocalPlaylist(playlistId: Long, tracks: List<AudioTrack>) {
+        if (tracks.isEmpty()) return
         viewModelScope.launch {
             try {
-                db.localPlaylistDao().insertTrack(
+                val entities = tracks.map { track ->
                     LocalPlaylistTrackEntity(
                         playlistId = playlistId,
                         trackId = track.id,
@@ -662,7 +701,35 @@ class MainPlayerViewModel(
                         durationMs = track.durationMs,
                         isLocal = track.isLocal
                     )
-                )
+                }
+                db.localPlaylistDao().insertTracks(entities)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun createLocalPlaylistWithTracks(name: String, tracks: List<AudioTrack>, onCreated: ((Long) -> Unit)? = null) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val newPl = LocalPlaylistEntity(name = name.trim())
+                val plId = db.localPlaylistDao().insertPlaylist(newPl)
+                if (tracks.isNotEmpty()) {
+                    val entities = tracks.map { track ->
+                        LocalPlaylistTrackEntity(
+                            playlistId = plId,
+                            trackId = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            audioUrl = track.audioUrl,
+                            durationMs = track.durationMs,
+                            isLocal = track.isLocal
+                        )
+                    }
+                    db.localPlaylistDao().insertTracks(entities)
+                }
+                onCreated?.invoke(plId)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
