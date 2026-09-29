@@ -304,7 +304,7 @@ SoundCloud використовується як додаткове зовніш
 
 Усі SoundCloud endpoint'и потребують JWT-авторизації.
 
-Для роботи потрібен `SoundCloud:AccessToken` або `SoundCloud:ClientId` у конфігурації backend.
+Для роботи потрібні `SoundCloud:ClientId` і `SoundCloud:ClientSecret` у конфігурації backend. Backend отримує OAuth access token через Client Credentials flow та оновлює його після завершення строку дії. `SoundCloud:AccessToken` можна використовувати лише для короткочасного локального тестування.
 
 Backend повертає тільки треки з доступом `playable`, які можна відтворювати поза SoundCloud. Android UI повинен показувати автора, SoundCloud як джерело та посилання `soundCloudUrl`.
 

@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
 using MusicPlayer.Api.DTOs.Audius;
+using MusicPlayer.Api.Infrastructure;
 
 namespace MusicPlayer.Api.Services;
 
@@ -22,7 +23,8 @@ public class AudiusService
 
     public async Task<List<AudiusTrackDto>> SearchAsync(
         string query,
-        int limit = 20)
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         query = query.Trim();
 
@@ -37,11 +39,13 @@ public class AudiusService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(5),
-            () => FetchSearchAsync(query, limit));
+            () => FetchSearchAsync(query, limit, cancellationToken),
+            cancellationToken);
     }
 
     public async Task<List<AudiusTrackDto>> GetTrendingAsync(
-        int limit = 20)
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         limit = Math.Clamp(limit, 1, 50);
 
@@ -50,10 +54,13 @@ public class AudiusService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(5),
-            () => FetchTrendingAsync(limit));
+            () => FetchTrendingAsync(limit, cancellationToken),
+            cancellationToken);
     }
 
-    public async Task<AudiusTrackDto?> GetTrackAsync(string trackId)
+    public async Task<AudiusTrackDto?> GetTrackAsync(
+        string trackId,
+        CancellationToken cancellationToken = default)
     {
         trackId = trackId.Trim();
 
@@ -65,11 +72,13 @@ public class AudiusService
         return await _cache.GetOrCreateAsync<AudiusTrackDto?>(
             cacheKey,
             TimeSpan.FromMinutes(30),
-            () => FetchTrackAsync(trackId));
+            () => FetchTrackAsync(trackId, cancellationToken),
+            cancellationToken);
     }
 
     public async Task<HttpResponseMessage> GetStreamAsync(
         string trackId,
+        string? rangeHeader,
         CancellationToken cancellationToken = default)
     {
         trackId = trackId.Trim();
@@ -77,8 +86,9 @@ public class AudiusService
         if (string.IsNullOrWhiteSpace(trackId))
             throw new ArgumentException("Track ID is required.");
 
-        var request = CreateAudiusRequest(
+        using var request = CreateAudiusRequest(
             $"tracks/{Uri.EscapeDataString(trackId)}/stream");
+        request.ApplyRangeHeader(rangeHeader);
 
         var response = await _httpClient.SendAsync(
             request,
@@ -90,20 +100,25 @@ public class AudiusService
 
     private async Task<List<AudiusTrackDto>> FetchSearchAsync(
         string query,
-        int limit)
+        int limit,
+        CancellationToken cancellationToken)
     {
         using var request = CreateAudiusRequest(
-            $"tracks/search?query={Uri.EscapeDataString(query)}");
+            $"tracks/search?query={Uri.EscapeDataString(query)}&limit={limit}");
 
-        using var response = await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(
+            request,
+            cancellationToken);
 
         response.EnsureSuccessStatusCode();
 
         using var stream =
-            await response.Content.ReadAsStreamAsync();
+            await response.Content.ReadAsStreamAsync(cancellationToken);
 
         using var document =
-            await JsonDocument.ParseAsync(stream);
+            await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken);
 
         var result = new List<AudiusTrackDto>();
 
@@ -118,20 +133,26 @@ public class AudiusService
         return result;
     }
 
-    private async Task<List<AudiusTrackDto>> FetchTrendingAsync(int limit)
+    private async Task<List<AudiusTrackDto>> FetchTrendingAsync(
+        int limit,
+        CancellationToken cancellationToken)
     {
         using var request = CreateAudiusRequest(
             $"tracks/trending?limit={limit}");
 
-        using var response = await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(
+            request,
+            cancellationToken);
 
         response.EnsureSuccessStatusCode();
 
         using var stream =
-            await response.Content.ReadAsStreamAsync();
+            await response.Content.ReadAsStreamAsync(cancellationToken);
 
         using var document =
-            await JsonDocument.ParseAsync(stream);
+            await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken);
 
         var result = new List<AudiusTrackDto>();
 
@@ -146,12 +167,16 @@ public class AudiusService
         return result;
     }
 
-    private async Task<AudiusTrackDto?> FetchTrackAsync(string trackId)
+    private async Task<AudiusTrackDto?> FetchTrackAsync(
+        string trackId,
+        CancellationToken cancellationToken)
     {
         using var request = CreateAudiusRequest(
             $"tracks/{Uri.EscapeDataString(trackId)}");
 
-        using var response = await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(
+            request,
+            cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             return null;
@@ -159,10 +184,12 @@ public class AudiusService
         response.EnsureSuccessStatusCode();
 
         using var stream =
-            await response.Content.ReadAsStreamAsync();
+            await response.Content.ReadAsStreamAsync(cancellationToken);
 
         using var document =
-            await JsonDocument.ParseAsync(stream);
+            await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken);
 
         if (!document.RootElement.TryGetProperty("data", out var data))
             return null;
@@ -175,7 +202,7 @@ public class AudiusService
         var apiKey = _configuration["Audius:ApiKey"];
 
         if (string.IsNullOrWhiteSpace(apiKey))
-            throw new InvalidOperationException(
+            throw new ExternalServiceConfigurationException(
                 "Audius API key is not configured.");
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);

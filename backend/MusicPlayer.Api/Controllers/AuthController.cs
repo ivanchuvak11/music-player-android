@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using MusicPlayer.Api.Data;
 using MusicPlayer.Api.DTOs.Auth;
@@ -10,6 +11,7 @@ namespace MusicPlayer.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[EnableRateLimiting("auth")]
 public class AuthController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -70,7 +72,18 @@ public class AuthController : ControllerBase
             request.Password);
 
         _db.Users.Add(user);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            return Conflict(new
+            {
+                message = "User with this email already exists."
+            });
+        }
 
         return Created(
             "/api/users/me",

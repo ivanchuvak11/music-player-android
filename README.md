@@ -63,7 +63,7 @@ Local API URLs:
 - Redis: `localhost:6379`
 
 For Audius endpoints, set `Audius:ApiKey` in `backend/MusicPlayer.Api/appsettings.Development.json`.
-For SoundCloud endpoints, set `SoundCloud:AccessToken` or `SoundCloud:ClientId` in `backend/MusicPlayer.Api/appsettings.Development.json`.
+For SoundCloud endpoints, set `SoundCloud:ClientId` and `SoundCloud:ClientSecret` in `backend/MusicPlayer.Api/appsettings.Development.json`. A short-lived `SoundCloud:AccessToken` can still be used for local testing.
 For Jamendo endpoints, set `Jamendo:ClientId` in `backend/MusicPlayer.Api/appsettings.Development.json`.
 
 Redis is used by the backend to cache read-only Audius and Radio Browser responses during local development.

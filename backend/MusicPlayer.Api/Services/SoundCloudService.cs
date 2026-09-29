@@ -2,28 +2,30 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using MusicPlayer.Api.DTOs.SoundCloud;
+using MusicPlayer.Api.Infrastructure;
 
 namespace MusicPlayer.Api.Services;
 
 public class SoundCloudService
 {
     private readonly HttpClient _httpClient;
-    private readonly IConfiguration _configuration;
+    private readonly SoundCloudTokenProvider _tokenProvider;
     private readonly CacheService _cache;
 
     public SoundCloudService(
         HttpClient httpClient,
-        IConfiguration configuration,
+        SoundCloudTokenProvider tokenProvider,
         CacheService cache)
     {
         _httpClient = httpClient;
-        _configuration = configuration;
+        _tokenProvider = tokenProvider;
         _cache = cache;
     }
 
     public async Task<List<SoundCloudTrackDto>> SearchAsync(
         string query,
-        int limit = 20)
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         query = query.Trim();
 
@@ -38,10 +40,13 @@ public class SoundCloudService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(5),
-            () => FetchSearchAsync(query, limit));
+            () => FetchSearchAsync(query, limit, cancellationToken),
+            cancellationToken);
     }
 
-    public async Task<SoundCloudTrackDto?> GetTrackAsync(string trackId)
+    public async Task<SoundCloudTrackDto?> GetTrackAsync(
+        string trackId,
+        CancellationToken cancellationToken = default)
     {
         trackId = trackId.Trim();
 
@@ -53,11 +58,13 @@ public class SoundCloudService
         return await _cache.GetOrCreateAsync<SoundCloudTrackDto?>(
             cacheKey,
             TimeSpan.FromMinutes(30),
-            () => FetchTrackAsync(trackId));
+            () => FetchTrackAsync(trackId, cancellationToken),
+            cancellationToken);
     }
 
     public async Task<HttpResponseMessage> GetStreamAsync(
         string trackId,
+        string? rangeHeader,
         CancellationToken cancellationToken = default)
     {
         trackId = trackId.Trim();
@@ -65,9 +72,10 @@ public class SoundCloudService
         if (string.IsNullOrWhiteSpace(trackId))
             throw new ArgumentException("Track ID is required.");
 
-        using var metadataRequest = CreateSoundCloudRequest(
+        using var metadataRequest = await CreateSoundCloudRequestAsync(
             $"tracks/{Uri.EscapeDataString(trackId)}",
-            acceptJson: true);
+            acceptJson: true,
+            cancellationToken);
 
         using var metadataResponse = await _httpClient.SendAsync(
             metadataRequest,
@@ -116,9 +124,11 @@ public class SoundCloudService
             };
         }
 
-        var streamRequest = CreateSoundCloudRequest(
+        using var streamRequest = await CreateSoundCloudRequestAsync(
             streamUrl,
-            acceptJson: false);
+            acceptJson: false,
+            cancellationToken);
+        streamRequest.ApplyRangeHeader(rangeHeader);
 
         return await _httpClient.SendAsync(
             streamRequest,
@@ -128,7 +138,8 @@ public class SoundCloudService
 
     private async Task<List<SoundCloudTrackDto>> FetchSearchAsync(
         string query,
-        int limit)
+        int limit,
+        CancellationToken cancellationToken)
     {
         var url =
             $"tracks?q={Uri.EscapeDataString(query)}" +
@@ -136,18 +147,23 @@ public class SoundCloudService
             $"&limit={limit}" +
             "&linked_partitioning=true";
 
-        using var request = CreateSoundCloudRequest(
+        using var request = await CreateSoundCloudRequestAsync(
             url,
-            acceptJson: true);
-        using var response = await _httpClient.SendAsync(request);
+            acceptJson: true,
+            cancellationToken);
+        using var response = await _httpClient.SendAsync(
+            request,
+            cancellationToken);
 
         response.EnsureSuccessStatusCode();
 
         using var stream =
-            await response.Content.ReadAsStreamAsync();
+            await response.Content.ReadAsStreamAsync(cancellationToken);
 
         using var document =
-            await JsonDocument.ParseAsync(stream);
+            await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken);
 
         var result = new List<SoundCloudTrackDto>();
 
@@ -168,13 +184,18 @@ public class SoundCloudService
         return result;
     }
 
-    private async Task<SoundCloudTrackDto?> FetchTrackAsync(string trackId)
+    private async Task<SoundCloudTrackDto?> FetchTrackAsync(
+        string trackId,
+        CancellationToken cancellationToken)
     {
-        using var request = CreateSoundCloudRequest(
+        using var request = await CreateSoundCloudRequestAsync(
             $"tracks/{Uri.EscapeDataString(trackId)}",
-            acceptJson: true);
+            acceptJson: true,
+            cancellationToken);
 
-        using var response = await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(
+            request,
+            cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             return null;
@@ -182,10 +203,12 @@ public class SoundCloudService
         response.EnsureSuccessStatusCode();
 
         using var stream =
-            await response.Content.ReadAsStreamAsync();
+            await response.Content.ReadAsStreamAsync(cancellationToken);
 
         using var document =
-            await JsonDocument.ParseAsync(stream);
+            await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken);
 
         if (!IsPlayable(document.RootElement))
             return null;
@@ -193,25 +216,13 @@ public class SoundCloudService
         return ParseTrack(document.RootElement);
     }
 
-    private HttpRequestMessage CreateSoundCloudRequest(
+    private async Task<HttpRequestMessage> CreateSoundCloudRequestAsync(
         string url,
-        bool acceptJson)
+        bool acceptJson,
+        CancellationToken cancellationToken)
     {
-        var accessToken = _configuration["SoundCloud:AccessToken"];
-        var clientId = _configuration["SoundCloud:ClientId"];
-
-        if (string.IsNullOrWhiteSpace(accessToken) &&
-            string.IsNullOrWhiteSpace(clientId))
-        {
-            throw new InvalidOperationException(
-                "SoundCloud AccessToken or ClientId is not configured.");
-        }
-
-        if (string.IsNullOrWhiteSpace(accessToken) &&
-            !string.IsNullOrWhiteSpace(clientId))
-        {
-            url = AppendQueryParameter(url, "client_id", clientId);
-        }
+        var accessToken = await _tokenProvider.GetAccessTokenAsync(
+            cancellationToken);
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
 
@@ -219,11 +230,8 @@ public class SoundCloudService
             new MediaTypeWithQualityHeaderValue(
                 acceptJson ? "application/json" : "*/*"));
 
-        if (!string.IsNullOrWhiteSpace(accessToken))
-        {
-            request.Headers.Authorization =
-                new AuthenticationHeaderValue("OAuth", accessToken);
-        }
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("OAuth", accessToken);
 
         return request;
     }
@@ -301,17 +309,4 @@ public class SoundCloudService
             : null;
     }
 
-    private static string AppendQueryParameter(
-        string url,
-        string name,
-        string value)
-    {
-        var separator = url.Contains('?') ? '&' : '?';
-
-        return url +
-               separator +
-               Uri.EscapeDataString(name) +
-               "=" +
-               Uri.EscapeDataString(value);
-    }
 }

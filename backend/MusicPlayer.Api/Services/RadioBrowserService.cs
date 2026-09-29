@@ -18,20 +18,23 @@ public class RadioBrowserService
 
     public async Task<List<RadioStationDto>> SearchAsync(
         string query,
-        int limit = 20)
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         return await SearchAsync(
             query,
             countryCode: null,
             genre: null,
-            limit);
+            limit,
+            cancellationToken);
     }
 
     public async Task<List<RadioStationDto>> SearchAsync(
         string query,
         string? countryCode,
         string? genre,
-        int limit = 20)
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         query = query.Trim();
         countryCode = countryCode?.Trim().ToUpperInvariant();
@@ -56,12 +59,19 @@ public class RadioBrowserService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(10),
-            () => FetchSearchAsync(query, countryCode, genre, limit));
+            () => FetchSearchAsync(
+                query,
+                countryCode,
+                genre,
+                limit,
+                cancellationToken),
+            cancellationToken);
     }
 
     public async Task<List<RadioStationDto>> GetByCountryAsync(
         string countryCode,
-        int limit = 20)
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         countryCode = countryCode.Trim().ToUpperInvariant();
 
@@ -72,12 +82,14 @@ public class RadioBrowserService
             query: string.Empty,
             countryCode,
             genre: null,
-            limit);
+            limit,
+            cancellationToken);
     }
 
     public async Task<List<RadioStationDto>> GetByGenreAsync(
         string genre,
-        int limit = 20)
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         genre = genre.Trim().ToLowerInvariant();
 
@@ -88,10 +100,13 @@ public class RadioBrowserService
             query: string.Empty,
             countryCode: null,
             genre,
-            limit);
+            limit,
+            cancellationToken);
     }
 
-    public async Task<RadioStationDto?> GetByIdAsync(string stationId)
+    public async Task<RadioStationDto?> GetByIdAsync(
+        string stationId,
+        CancellationToken cancellationToken = default)
     {
         stationId = stationId.Trim();
 
@@ -104,10 +119,13 @@ public class RadioBrowserService
         return await _cache.GetOrCreateAsync<RadioStationDto?>(
             cacheKey,
             TimeSpan.FromHours(24),
-            () => FetchByIdAsync(stationId));
+            () => FetchByIdAsync(stationId, cancellationToken),
+            cancellationToken);
     }
 
-    public async Task<List<RadioStationDto>> GetPopularAsync(int limit = 20)
+    public async Task<List<RadioStationDto>> GetPopularAsync(
+        int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         limit = Math.Clamp(limit, 1, 50);
 
@@ -116,14 +134,16 @@ public class RadioBrowserService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(10),
-            () => FetchPopularAsync(limit));
+            () => FetchPopularAsync(limit, cancellationToken),
+            cancellationToken);
     }
 
     private async Task<List<RadioStationDto>> FetchSearchAsync(
         string query,
         string? countryCode,
         string? genre,
-        int limit)
+        int limit,
+        CancellationToken cancellationToken)
     {
         var queryParameters = new List<string>
         {
@@ -154,30 +174,40 @@ public class RadioBrowserService
         var url = $"json/stations/search?{string.Join("&", queryParameters)}";
 
         var stations =
-            await _httpClient.GetFromJsonAsync<List<RadioStationDto>>(url);
+            await _httpClient.GetFromJsonAsync<List<RadioStationDto>>(
+                url,
+                cancellationToken);
 
         return stations ?? new List<RadioStationDto>();
     }
 
-    private async Task<RadioStationDto?> FetchByIdAsync(string stationId)
+    private async Task<RadioStationDto?> FetchByIdAsync(
+        string stationId,
+        CancellationToken cancellationToken)
     {
         var encodedId = Uri.EscapeDataString(stationId);
         var url = $"json/stations/byuuid/{encodedId}";
 
         var stations =
-            await _httpClient.GetFromJsonAsync<List<RadioStationDto>>(url);
+            await _httpClient.GetFromJsonAsync<List<RadioStationDto>>(
+                url,
+                cancellationToken);
 
         return stations?.FirstOrDefault();
     }
 
-    private async Task<List<RadioStationDto>> FetchPopularAsync(int limit)
+    private async Task<List<RadioStationDto>> FetchPopularAsync(
+        int limit,
+        CancellationToken cancellationToken)
     {
         var url =
             $"json/stations/topclick/{limit}" +
             "?hidebroken=true";
 
         var stations =
-            await _httpClient.GetFromJsonAsync<List<RadioStationDto>>(url);
+            await _httpClient.GetFromJsonAsync<List<RadioStationDto>>(
+                url,
+                cancellationToken);
 
         return stations ?? new List<RadioStationDto>();
     }

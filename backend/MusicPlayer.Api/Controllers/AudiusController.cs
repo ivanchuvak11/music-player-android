@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using MusicPlayer.Api.Infrastructure;
 using MusicPlayer.Api.Services;
 
 namespace MusicPlayer.Api.Controllers;
@@ -20,7 +22,8 @@ public class AudiusController : ControllerBase
     [HttpGet("search")]
     public async Task<IActionResult> Search(
         [FromQuery] string q,
-        [FromQuery] int limit = 20)
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(q))
         {
@@ -30,7 +33,7 @@ public class AudiusController : ControllerBase
             });
         }
 
-        var tracks = await _audius.SearchAsync(q, limit);
+        var tracks = await _audius.SearchAsync(q, limit, cancellationToken);
 
         return Ok(tracks);
     }
@@ -38,16 +41,19 @@ public class AudiusController : ControllerBase
     // GET /api/audius/trending?limit=10
     [HttpGet("trending")]
     public async Task<IActionResult> Trending(
-        [FromQuery] int limit = 20)
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
     {
-        var tracks = await _audius.GetTrendingAsync(limit);
+        var tracks = await _audius.GetTrendingAsync(limit, cancellationToken);
 
         return Ok(tracks);
     }
 
     // GET /api/audius/tracks/{id}
     [HttpGet("tracks/{id}")]
-    public async Task<IActionResult> GetTrack(string id)
+    public async Task<IActionResult> GetTrack(
+        string id,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -57,7 +63,7 @@ public class AudiusController : ControllerBase
             });
         }
 
-        var track = await _audius.GetTrackAsync(id);
+        var track = await _audius.GetTrackAsync(id, cancellationToken);
 
         if (track is null)
         {
@@ -72,6 +78,7 @@ public class AudiusController : ControllerBase
 
     // GET /api/audius/tracks/{id}/stream
     [HttpGet("tracks/{id}/stream")]
+    [EnableRateLimiting("stream")]
     public async Task<IActionResult> Stream(
         string id,
         CancellationToken cancellationToken)
@@ -84,28 +91,25 @@ public class AudiusController : ControllerBase
             });
         }
 
-        var response =
-            await _audius.GetStreamAsync(id, cancellationToken);
+        var response = await _audius.GetStreamAsync(
+            id,
+            Request.Headers.Range.ToString(),
+            cancellationToken);
 
         if (!response.IsSuccessStatusCode)
         {
+            var statusCode = UpstreamStatusMapper.ToClientStatus(
+                response.StatusCode);
             response.Dispose();
 
             return StatusCode(
-                (int)response.StatusCode,
+                statusCode,
                 new
                 {
                     message = "Unable to get Audius stream."
                 });
         }
 
-        var stream =
-            await response.Content.ReadAsStreamAsync(cancellationToken);
-
-        var contentType =
-            response.Content.Headers.ContentType?.MediaType
-            ?? "audio/mpeg";
-
-        return File(stream, contentType);
+        return new UpstreamStreamResult(response);
     }
 }

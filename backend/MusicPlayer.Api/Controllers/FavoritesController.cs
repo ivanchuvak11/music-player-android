@@ -116,7 +116,18 @@ public class FavoritesController : ControllerBase
         };
 
         _db.FavoriteTracks.Add(favorite);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            return Conflict(new
+            {
+                message = "Track is already in favorites."
+            });
+        }
 
         return Ok(new
         {

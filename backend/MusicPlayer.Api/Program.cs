@@ -1,13 +1,19 @@
 using System.Text;
+using System.Security.Claims;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using MusicPlayer.Api.Data;
+using MusicPlayer.Api.Infrastructure;
 using MusicPlayer.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(
@@ -51,6 +57,7 @@ builder.Services.AddHttpClient<RadioBrowserService>(client =>
 
     client.DefaultRequestHeaders.UserAgent.ParseAdd(
         "MusicPlayerAndroid/1.0");
+    client.Timeout = TimeSpan.FromSeconds(15);
 });
 
 builder.Services.AddHttpClient<AudiusService>(client =>
@@ -62,6 +69,11 @@ builder.Services.AddHttpClient<AudiusService>(client =>
 builder.Services.AddHttpClient<SoundCloudService>(client =>
 {
     client.BaseAddress = new Uri("https://api.soundcloud.com/");
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
+
+builder.Services.AddHttpClient("SoundCloudAuth", client =>
+{
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
@@ -80,11 +92,42 @@ builder.Services.AddStackExchangeRedisCache(options =>
 });
 
 builder.Services.AddAuthorization();
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.AddPolicy("auth", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+
+    options.AddPolicy("stream", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.User.FindFirstValue(ClaimTypes.NameIdentifier) ??
+            context.Connection.RemoteIpAddress?.ToString() ??
+            "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 120,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
+});
 
 builder.Services.AddScoped<JwtService>();
 builder.Services.AddScoped<CacheService>();
+builder.Services.AddSingleton<SoundCloudTokenProvider>();
 
 var app = builder.Build();
+
+app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
 {
@@ -94,6 +137,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();

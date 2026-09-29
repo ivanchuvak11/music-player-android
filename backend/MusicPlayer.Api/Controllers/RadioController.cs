@@ -40,7 +40,8 @@ public class RadioController : ControllerBase
         [FromQuery] string? q,
         [FromQuery] string? countryCode,
         [FromQuery] string? genre,
-        [FromQuery] int limit = 20)
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(q) &&
             string.IsNullOrWhiteSpace(countryCode) &&
@@ -56,7 +57,8 @@ public class RadioController : ControllerBase
             q ?? string.Empty,
             countryCode,
             genre,
-            limit);
+            limit,
+            cancellationToken);
 
         return Ok(ToRadioStationResponse(stations));
     }
@@ -64,9 +66,12 @@ public class RadioController : ControllerBase
     // GET /api/radio/popular?limit=20
     [HttpGet("popular")]
     public async Task<IActionResult> GetPopular(
-        [FromQuery] int limit = 20)
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
     {
-        var stations = await _radioBrowser.GetPopularAsync(limit);
+        var stations = await _radioBrowser.GetPopularAsync(
+            limit,
+            cancellationToken);
 
         return Ok(ToRadioStationResponse(stations));
     }
@@ -75,7 +80,8 @@ public class RadioController : ControllerBase
     [HttpGet("by-country/{countryCode}")]
     public async Task<IActionResult> GetByCountry(
         string countryCode,
-        [FromQuery] int limit = 20)
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(countryCode))
         {
@@ -87,7 +93,8 @@ public class RadioController : ControllerBase
 
         var stations = await _radioBrowser.GetByCountryAsync(
             countryCode,
-            limit);
+            limit,
+            cancellationToken);
 
         return Ok(ToRadioStationResponse(stations));
     }
@@ -96,7 +103,8 @@ public class RadioController : ControllerBase
     [HttpGet("by-genre/{genre}")]
     public async Task<IActionResult> GetByGenre(
         string genre,
-        [FromQuery] int limit = 20)
+        [FromQuery] int limit = 20,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(genre))
         {
@@ -108,7 +116,8 @@ public class RadioController : ControllerBase
 
         var stations = await _radioBrowser.GetByGenreAsync(
             genre,
-            limit);
+            limit,
+            cancellationToken);
 
         return Ok(ToRadioStationResponse(stations));
     }
@@ -145,7 +154,8 @@ public class RadioController : ControllerBase
     // POST /api/radio/favorites
     [HttpPost("favorites")]
     public async Task<IActionResult> AddFavorite(
-        AddFavoriteRadioRequest request)
+        AddFavoriteRadioRequest request,
+        CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
 
@@ -175,7 +185,7 @@ public class RadioController : ControllerBase
         }
 
         var radioStation =
-            await _radioBrowser.GetByIdAsync(stationId);
+            await _radioBrowser.GetByIdAsync(stationId, cancellationToken);
 
         if (radioStation is null ||
             string.IsNullOrWhiteSpace(radioStation.StreamUrl))
@@ -199,7 +209,17 @@ public class RadioController : ControllerBase
 
         _db.FavoriteRadioStations.Add(station);
 
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (ex.IsUniqueConstraintViolation())
+        {
+            return Conflict(new
+            {
+                message = "Radio station is already in favorites."
+            });
+        }
 
         return Ok(new
         {
