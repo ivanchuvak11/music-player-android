@@ -359,4 +359,20 @@ class AudioModelTest {
         assertTrue("Should include Radio ROKS", stations.any { it.name.contains("Radio ROKS") })
         assertTrue("All stations must have valid stream URLs", stations.all { it.streamUrl.startsWith("http") })
     }
+
+    @Test
+    fun testAudioEffectsStateHeadphonesDefault() {
+        val state = com.musicplayer.android.core.audio.AudioEffectsState()
+        assertFalse("Headphones should not be connected by default in empty state", state.isHeadphonesConnected)
+        assertFalse("Equalizer should be disabled by default", state.isEnabled)
+    }
+
+    @Test
+    fun testAudioEffectsManagerRejectsEnableWithoutHeadphones() {
+        // Without context/headphones connected, setEnabled(true) must reject enabling
+        val result = com.musicplayer.android.core.audio.AudioEffectsManager.setEnabled(true, null)
+        assertFalse("Equalizer must not enable when headphones are not connected", result)
+        assertFalse("State isEnabled must remain false", com.musicplayer.android.core.audio.AudioEffectsManager.effectsState.value.isEnabled)
+    }
 }
+

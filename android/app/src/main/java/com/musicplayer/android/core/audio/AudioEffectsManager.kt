@@ -1,9 +1,15 @@
 package com.musicplayer.android.core.audio
 
 import android.content.Context
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.media.audiofx.LoudnessEnhancer
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import com.musicplayer.android.core.session.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +23,7 @@ import kotlinx.coroutines.launch
  */
 data class AudioEffectsState(
     val isEnabled: Boolean = false,
+    val isHeadphonesConnected: Boolean = false,
     val currentPreset: String = PRESET_FLAT,
     val bassBoostStrength: Short = 0,
     val loudnessEnhancerGainMb: Int = 0,
@@ -63,7 +70,7 @@ data class AudioEffectsState(
 
 /**
  * Singleton managing hardware Equalizer, BassBoost, and LoudnessEnhancer
- * attached to the ExoPlayer audio session.
+ * attached to the ExoPlayer audio session. Requires headphones/headset to enable.
  */
 object AudioEffectsManager {
 
@@ -71,9 +78,114 @@ object AudioEffectsManager {
     private var bassBoost: BassBoost? = null
     private var loudnessEnhancer: LoudnessEnhancer? = null
     private var currentSessionId: Int = 0
+    private var audioManager: AudioManager? = null
+    private var audioDeviceCallback: AudioDeviceCallback? = null
+    private var headsetReceiver: android.content.BroadcastReceiver? = null
 
     private val _effectsState = MutableStateFlow(AudioEffectsState())
     val effectsState: StateFlow<AudioEffectsState> = _effectsState.asStateFlow()
+
+    fun isHeadphonesConnected(context: Context): Boolean {
+        val appContext = context.applicationContext
+        val am = audioManager ?: (appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.also {
+            audioManager = it
+        } ?: return false
+
+        try {
+            val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            val hasHeadphone = devices.any { device ->
+                when (device.type) {
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    AudioDeviceInfo.TYPE_USB_HEADSET -> true
+                    else -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            device.type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+                            device.type == AudioDeviceInfo.TYPE_BLE_SPEAKER
+                        } else {
+                            false
+                        }
+                    }
+                }
+            }
+            if (hasHeadphone) return true
+        } catch (e: Throwable) {
+            e.printStackTrace()
+        }
+
+        // Secondary fallback for vendor HALs where getDevices may lag
+        try {
+            @Suppress("DEPRECATION")
+            if (am.isWiredHeadsetOn || am.isBluetoothA2dpOn || am.isBluetoothScoOn) {
+                return true
+            }
+        } catch (e: Throwable) {
+            e.printStackTrace()
+        }
+
+        return false
+    }
+
+    @Synchronized
+    fun registerAudioDeviceCallback(context: Context) {
+        val appContext = context.applicationContext
+        val am = audioManager ?: (appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager)?.also {
+            audioManager = it
+        } ?: return
+
+        val connected = isHeadphonesConnected(appContext)
+        _effectsState.value = _effectsState.value.copy(isHeadphonesConnected = connected)
+
+        if (audioDeviceCallback == null) {
+            val callback = object : AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) {
+                    checkAndUpdateHeadphoneStatus(appContext)
+                }
+
+                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) {
+                    checkAndUpdateHeadphoneStatus(appContext)
+                }
+            }
+            audioDeviceCallback = callback
+            try {
+                am.registerAudioDeviceCallback(callback, Handler(Looper.getMainLooper()))
+            } catch (e: Throwable) {
+                e.printStackTrace()
+            }
+        }
+
+        if (headsetReceiver == null) {
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: Context?, intent: android.content.Intent?) {
+                    checkAndUpdateHeadphoneStatus(appContext)
+                }
+            }
+            headsetReceiver = receiver
+            try {
+                val filter = android.content.IntentFilter().apply {
+                    addAction(android.content.Intent.ACTION_HEADSET_PLUG)
+                    addAction(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+                }
+                appContext.registerReceiver(receiver, filter)
+            } catch (e: Throwable) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    @Synchronized
+    fun checkAndUpdateHeadphoneStatus(context: Context) {
+        val connected = isHeadphonesConnected(context)
+        val currentlyEnabled = _effectsState.value.isEnabled
+        if (!connected && currentlyEnabled) {
+            // Auto-disable hardware effects immediately when headphones are disconnected
+            setEnabled(false, context)
+        } else {
+            _effectsState.value = _effectsState.value.copy(isHeadphonesConnected = connected)
+        }
+    }
 
     @Synchronized
     fun init(audioSessionId: Int) {
@@ -82,8 +194,9 @@ object AudioEffectsManager {
         currentSessionId = audioSessionId
 
         try {
+            val canEnable = _effectsState.value.isEnabled && _effectsState.value.isHeadphonesConnected
             val eq = Equalizer(0, audioSessionId).apply {
-                enabled = _effectsState.value.isEnabled
+                enabled = canEnable
             }
             equalizer = eq
 
@@ -96,17 +209,17 @@ object AudioEffectsManager {
             val bandsMap = mutableMapOf<Short, Short>()
             for (i in 0 until numBands) {
                 val band = i.toShort()
-                val targetLevel = currentLevels[band] ?: 0.toShort()
+                val targetLevel = if (canEnable) (currentLevels[band] ?: 0.toShort()) else 0.toShort()
                 try {
                     eq.setBandLevel(band, targetLevel)
                 } catch (e: Throwable) { }
-                bandsMap[band] = targetLevel
+                bandsMap[band] = currentLevels[band] ?: 0.toShort()
             }
 
             val bb = BassBoost(0, audioSessionId).apply {
-                enabled = _effectsState.value.isEnabled
+                enabled = canEnable
                 if (strengthSupported) {
-                    setStrength(_effectsState.value.bassBoostStrength)
+                    setStrength(if (canEnable) _effectsState.value.bassBoostStrength else 0.toShort())
                 }
             }
             bassBoost = bb
@@ -114,7 +227,7 @@ object AudioEffectsManager {
             try {
                 val le = LoudnessEnhancer(audioSessionId).apply {
                     val gain = _effectsState.value.loudnessEnhancerGainMb
-                    enabled = _effectsState.value.isEnabled && gain > 0
+                    enabled = canEnable && gain > 0
                     if (gain > 0) setTargetGain(gain)
                 }
                 loudnessEnhancer = le
@@ -134,16 +247,70 @@ object AudioEffectsManager {
     }
 
     @Synchronized
-    fun setEnabled(enabled: Boolean, context: Context? = null) {
-        try {
-            equalizer?.enabled = enabled
-            bassBoost?.enabled = enabled
-            loudnessEnhancer?.enabled = enabled && _effectsState.value.loudnessEnhancerGainMb > 0
-        } catch (e: Throwable) {
-            e.printStackTrace()
+    fun setEnabled(enabled: Boolean, context: Context? = null): Boolean {
+        val appContext = context?.applicationContext
+        val headphonesConnected = appContext?.let { isHeadphonesConnected(it) } ?: _effectsState.value.isHeadphonesConnected
+
+        val actualEnabled = if (enabled) {
+            if (!headphonesConnected) {
+                false
+            } else {
+                true
+            }
+        } else {
+            false
         }
-        _effectsState.value = _effectsState.value.copy(isEnabled = enabled)
-        if (context != null) persistState(context)
+
+        if (actualEnabled) {
+            try {
+                equalizer?.enabled = true
+                val numBands = equalizer?.numberOfBands ?: 0
+                val savedLevels = _effectsState.value.bandLevels
+                for (i in 0 until numBands) {
+                    val band = i.toShort()
+                    val targetLevel = savedLevels[band] ?: 0.toShort()
+                    try {
+                        equalizer?.setBandLevel(band, targetLevel)
+                    } catch (e: Throwable) { }
+                }
+                bassBoost?.let {
+                    it.enabled = true
+                    if (it.strengthSupported) {
+                        it.setStrength(_effectsState.value.bassBoostStrength)
+                    }
+                }
+                loudnessEnhancer?.enabled = _effectsState.value.loudnessEnhancerGainMb > 0
+            } catch (e: Throwable) {
+                e.printStackTrace()
+            }
+        } else {
+            try {
+                // Neutralize all hardware filters immediately
+                val numBands = equalizer?.numberOfBands ?: 0
+                for (i in 0 until numBands) {
+                    try {
+                        equalizer?.setBandLevel(i.toShort(), 0.toShort())
+                    } catch (e: Throwable) { }
+                }
+                bassBoost?.let {
+                    if (it.strengthSupported) {
+                        try { it.setStrength(0.toShort()) } catch (e: Throwable) { }
+                    }
+                    it.enabled = false
+                }
+                loudnessEnhancer?.enabled = false
+                equalizer?.enabled = false
+            } catch (e: Throwable) {
+                e.printStackTrace()
+            }
+        }
+
+        _effectsState.value = _effectsState.value.copy(
+            isEnabled = actualEnabled,
+            isHeadphonesConnected = headphonesConnected
+        )
+        if (appContext != null) persistState(appContext)
+        return actualEnabled
     }
 
     @Synchronized
@@ -265,13 +432,18 @@ object AudioEffectsManager {
 
     fun restorePersistedState(context: Context) {
         try {
-            val sessionManager = SessionManager.getInstance(context)
-            val isEnabled = sessionManager.getEqualizerEnabled()
+            val appContext = context.applicationContext
+            registerAudioDeviceCallback(appContext)
+            val sessionManager = SessionManager.getInstance(appContext)
+            val savedEnabled = sessionManager.getEqualizerEnabled()
+            val headphonesConnected = isHeadphonesConnected(appContext)
+            val actualEnabled = savedEnabled && headphonesConnected
             val preset = sessionManager.getEqualizerPreset()
             val bass = sessionManager.getEqualizerBassBoost()
             val levels = sessionManager.getEqualizerBandLevels(_effectsState.value.numberOfBands.toInt())
             _effectsState.value = _effectsState.value.copy(
-                isEnabled = isEnabled,
+                isEnabled = actualEnabled,
+                isHeadphonesConnected = headphonesConnected,
                 currentPreset = preset,
                 bassBoostStrength = bass,
                 bandLevels = levels

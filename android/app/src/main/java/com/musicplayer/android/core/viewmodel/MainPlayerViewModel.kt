@@ -426,8 +426,8 @@ class MainPlayerViewModel(
     }
 
     // Audio Effects & Equalizer Controls
-    fun setEqualizerEnabled(enabled: Boolean) {
-        AudioEffectsManager.setEnabled(enabled, getApplication())
+    fun setEqualizerEnabled(enabled: Boolean): Boolean {
+        return AudioEffectsManager.setEnabled(enabled, getApplication())
     }
 
     fun setEqualizerPreset(presetName: String) {

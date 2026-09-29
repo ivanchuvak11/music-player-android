@@ -192,13 +192,13 @@ class PlayerControllerImpl(
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         fadeJob = scope.launch {
             try {
-                controller.volume = 0.2f
+                controller.volume = 0.6f
                 controller.play()
-                val steps = 4
-                val stepDelay = 35L
+                val steps = 2
+                val stepDelay = 20L
                 for (i in 1..steps) {
                     delay(stepDelay)
-                    controller.volume = 0.2f + (0.8f * i / steps)
+                    controller.volume = 0.6f + (0.4f * i / steps)
                 }
             } catch (e: Exception) {
                 controller.play()
@@ -213,8 +213,8 @@ class PlayerControllerImpl(
         fadeJob?.cancel()
         fadeJob = scope.launch {
             try {
-                val steps = 5
-                val stepDelay = 35L
+                val steps = 2
+                val stepDelay = 20L
                 for (i in (steps - 1) downTo 0) {
                     controller.volume = i.toFloat() / steps
                     delay(stepDelay)
