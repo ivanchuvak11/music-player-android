@@ -2063,7 +2063,7 @@ fun LocalPlaylistCard(
                                 Text("▶", fontSize = 14.sp)
                             }
                             IconButton(onClick = {
-                                viewModel.removeTrackFromLocalPlaylist(playlist.id, trackEntity.trackId)
+                                viewModel.removeTrackFromLocalPlaylist(playlist.id, trackEntity.trackId, trackEntity.id)
                             }) {
                                 Text("✕", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
                             }

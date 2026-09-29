@@ -785,10 +785,14 @@ class MainPlayerViewModel(
         }
     }
 
-    fun removeTrackFromLocalPlaylist(playlistId: Long, trackId: String) {
+    fun removeTrackFromLocalPlaylist(playlistId: Long, trackId: String, rowId: Long = 0L) {
         viewModelScope.launch {
             try {
-                db.localPlaylistDao().removeTrackFromPlaylist(playlistId, trackId)
+                if (rowId > 0L) {
+                    db.localPlaylistDao().removeTrackById(rowId)
+                } else {
+                    db.localPlaylistDao().removeTrackFromPlaylist(playlistId, trackId)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }

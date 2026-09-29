@@ -35,6 +35,9 @@ interface LocalPlaylistDao {
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId AND trackId = :trackId")
     suspend fun removeTrackFromPlaylist(playlistId: Long, trackId: String)
 
+    @Query("DELETE FROM playlist_tracks WHERE id = :id")
+    suspend fun removeTrackById(id: Long)
+
     @Query("SELECT COUNT(*) FROM playlist_tracks WHERE playlistId = :playlistId")
     fun getTrackCount(playlistId: Long): Flow<Int>
 }
