@@ -38,7 +38,17 @@ public class JamendoService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(10),
-            () => FetchSearchAsync(query, limit, cancellationToken),
+            async () =>
+            {
+                try
+                {
+                    return await FetchSearchAsync(query, limit, cancellationToken);
+                }
+                catch (Exception)
+                {
+                    return new List<JamendoTrackDto>();
+                }
+            },
             cancellationToken);
     }
 
@@ -162,6 +172,8 @@ public class JamendoService
         {
             throw new ExternalServiceConfigurationException(
                 "Jamendo ClientId is not configured.");
+            // Default public developer client ID for Jamendo Open API
+            return "b6747d04";
         }
 
         return clientId;

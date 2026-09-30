@@ -39,7 +39,17 @@ public class AudiusService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(5),
-            () => FetchSearchAsync(query, limit, cancellationToken),
+            async () =>
+            {
+                try
+                {
+                    return await FetchSearchAsync(query, limit, cancellationToken);
+                }
+                catch (Exception)
+                {
+                    return new List<AudiusTrackDto>();
+                }
+            },
             cancellationToken);
     }
 
@@ -200,15 +210,16 @@ public class AudiusService
     private HttpRequestMessage CreateAudiusRequest(string url)
     {
         var apiKey = _configuration["Audius:ApiKey"];
+        var separator = url.Contains('?') ? "&" : "?";
+        var finalUrl = url + $"{separator}app_name=MusicPlayerAndroid";
 
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new ExternalServiceConfigurationException(
-                "Audius API key is not configured.");
+        var request = new HttpRequestMessage(HttpMethod.Get, finalUrl);
 
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
-
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", apiKey);
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            request.Headers.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+        }
 
         return request;
     }

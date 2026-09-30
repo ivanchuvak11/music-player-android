@@ -1,22 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Production security: By default only HTTPS is allowed -->
-    <base-config cleartextTrafficPermitted="false">
+    <!-- Base configuration: permit cleartext HTTP so local Wi-Fi dev servers and HTTP radio streams function smoothly -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
-
-    <!-- Legacy online radio streams and IP-based radio stations that still rely on HTTP audio streams -->
-    <domain-config cleartextTrafficPermitted="true">
-        <!-- Radio-browser and stream CDN domains often serve HTTP audio streams -->
-        <domain includeSubdomains="true">stream.zeno.fm</domain>
-        <domain includeSubdomains="true">icecast.org</domain>
-        <domain includeSubdomains="true">radionomy.com</domain>
-        <domain includeSubdomains="true">shoutcast.com</domain>
-        <!-- Local dev environment whitelist -->
-        <domain includeSubdomains="true">10.0.2.2</domain>
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
-    </domain-config>
 </network-security-config>

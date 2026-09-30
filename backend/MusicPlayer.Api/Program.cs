@@ -11,13 +11,22 @@ using MusicPlayer.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddOpenApi();
+builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(
-    builder.Configuration.GetConnectionString("DefaultConnection")));
+{
+    var conn = builder.Configuration.GetConnectionString("DefaultConnection") ?? "";
+    if (conn.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase) || conn.EndsWith(".db", StringComparison.OrdinalIgnoreCase))
+    {
+        options.UseSqlite(conn);
+    }
+    else
+    {
+        options.UseNpgsql(conn);
+    }
+});
 
 builder.Services.AddControllers();
 
@@ -88,13 +97,19 @@ builder.Services.AddHttpClient<YouTubeService>(client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-builder.Services.AddStackExchangeRedisCache(options =>
+var redisConn = builder.Configuration.GetConnectionString("Redis");
+if (!string.IsNullOrEmpty(redisConn))
 {
-    options.Configuration =
-        builder.Configuration.GetConnectionString("Redis")
-        ?? "localhost:6379";
-    options.InstanceName = "MusicPlayer:";
-});
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConn;
+        options.InstanceName = "MusicPlayer:";
+    });
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
 
 builder.Services.AddAuthorization();
 builder.Services.AddRateLimiter(options =>
@@ -147,6 +162,34 @@ app.UseAuthentication();
 app.UseRateLimiter();
 app.UseAuthorization();
 
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    try
+    {
+        db.Database.EnsureCreated();
+        // Seed demo user if not present
+        if (!db.Users.Any(u => u.Email == "ivan@example.com"))
+        {
+            var hasher = new Microsoft.AspNetCore.Identity.PasswordHasher<MusicPlayer.Api.Models.User>();
+            var demoUser = new MusicPlayer.Api.Models.User
+            {
+                Username = "ivan",
+                Email = "ivan@example.com",
+                CreatedAt = DateTime.UtcNow
+            };
+            demoUser.PasswordHash = hasher.HashPassword(demoUser, "Test12345");
+            db.Users.Add(demoUser);
+            db.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Database auto-creation or seeding skipped: {Message}", ex.Message);
+    }
+}
+
 app.MapControllers();
 
 app.Run();
+
