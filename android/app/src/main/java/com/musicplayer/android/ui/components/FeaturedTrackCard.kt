@@ -92,8 +92,16 @@ fun FeaturedTrackCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.height(2.dp))
+                    val sourceLabel = when {
+                        track.id.startsWith("youtube_") -> "YouTube"
+                        track.id.startsWith("soundcloud_") -> "SoundCloud"
+                        track.id.startsWith("audius_") -> "Audius"
+                        track.id.startsWith("jamendo_") -> "Jamendo"
+                        else -> null
+                    }
+                    val subtitle = if (sourceLabel != null) "${track.artist} • $sourceLabel" else track.artist
                     Text(
-                        text = track.artist,
+                        text = subtitle,
                         fontSize = 11.sp,
                         color = DarkRefTheme.TextSecondary,
                         maxLines = 1,
