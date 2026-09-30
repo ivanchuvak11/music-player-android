@@ -92,13 +92,37 @@ builder.Services.AddHttpClient<YouTubeService>(client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-builder.Services.AddStackExchangeRedisCache(options =>
+var redisConn = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+var redisHost = redisConn.Split(':')[0];
+var redisPort = redisConn.Contains(':') && int.TryParse(redisConn.Split(':')[1], out var p) ? p : 6379;
+
+bool isRedisAvailable = false;
+try
 {
-    options.Configuration =
-        builder.Configuration.GetConnectionString("Redis")
-        ?? "localhost:6379";
-    options.InstanceName = "MusicPlayer:";
-});
+    using var tcp = new System.Net.Sockets.TcpClient();
+    var connectTask = tcp.ConnectAsync(redisHost, redisPort);
+    if (connectTask.Wait(TimeSpan.FromMilliseconds(300)))
+    {
+        isRedisAvailable = tcp.Connected;
+    }
+}
+catch
+{
+    isRedisAvailable = false;
+}
+
+if (isRedisAvailable)
+{
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConn;
+        options.InstanceName = "MusicPlayer:";
+    });
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
 
 builder.Services.AddAuthorization();
 builder.Services.AddRateLimiter(options =>
