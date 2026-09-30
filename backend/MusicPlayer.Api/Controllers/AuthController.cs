@@ -29,12 +29,13 @@ public class AuthController : ControllerBase
     [HttpPost("register")]
     public async Task<IActionResult> Register(RegisterRequest request)
     {
-        var username = request.Username.Trim();
-        var email = request.Email.Trim().ToLowerInvariant();
+        var username = request.Username?.Trim() ?? string.Empty;
+        var email = request.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+        var password = request.Password ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(username) ||
             string.IsNullOrWhiteSpace(email) ||
-            string.IsNullOrWhiteSpace(request.Password))
+            string.IsNullOrWhiteSpace(password))
         {
             return BadRequest(new
             {
@@ -42,7 +43,7 @@ public class AuthController : ControllerBase
             });
         }
 
-        if (request.Password.Length < 8)
+        if (password.Length < 8)
         {
             return BadRequest(new
             {
@@ -69,7 +70,7 @@ public class AuthController : ControllerBase
 
         user.PasswordHash = _passwordHasher.HashPassword(
             user,
-            request.Password);
+            password);
 
         _db.Users.Add(user);
 
@@ -99,7 +100,16 @@ public class AuthController : ControllerBase
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
     {
-        var email = request.Email.Trim().ToLowerInvariant();
+        var email = request.Email?.Trim().ToLowerInvariant() ?? string.Empty;
+        var password = request.Password ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        {
+            return Unauthorized(new
+            {
+                message = "Invalid email or password."
+            });
+        }
 
         var user = await _db.Users
             .SingleOrDefaultAsync(u => u.Email == email);
@@ -115,7 +125,7 @@ public class AuthController : ControllerBase
         var result = _passwordHasher.VerifyHashedPassword(
             user,
             user.PasswordHash,
-            request.Password);
+            password);
 
         if (result == PasswordVerificationResult.Failed)
         {

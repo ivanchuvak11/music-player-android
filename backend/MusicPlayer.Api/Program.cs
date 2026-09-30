@@ -83,6 +83,11 @@ builder.Services.AddHttpClient<JamendoService>(client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
+builder.Services.AddHttpClient<YouTubeService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
 builder.Services.AddStackExchangeRedisCache(options =>
 {
     options.Configuration =
@@ -133,8 +138,10 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
-app.UseHttpsRedirection();
+else
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseAuthentication();
 app.UseRateLimiter();

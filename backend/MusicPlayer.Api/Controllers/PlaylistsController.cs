@@ -105,7 +105,7 @@ public class PlaylistsController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var name = request.Name.Trim();
+        var name = request.Name?.Trim() ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -159,9 +159,7 @@ public class PlaylistsController : ControllerBase
             });
         }
 
-        var source = request.Source
-            .Trim()
-            .ToLowerInvariant();
+        var source = request.Source?.Trim().ToLowerInvariant() ?? string.Empty;
 
         if (source != "audius" &&
             source != "youtube" &&
@@ -174,16 +172,18 @@ public class PlaylistsController : ControllerBase
             });
         }
 
-        if (string.IsNullOrWhiteSpace(request.ExternalId) ||
-            string.IsNullOrWhiteSpace(request.Title))
+        var externalId = request.ExternalId?.Trim() ?? string.Empty;
+        var title = request.Title?.Trim() ?? string.Empty;
+        var artist = request.Artist?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(externalId) ||
+            string.IsNullOrWhiteSpace(title))
         {
             return BadRequest(new
             {
                 message = "ExternalId and Title are required."
             });
         }
-
-        var externalId = request.ExternalId.Trim();
 
         var alreadyExists = await _db.PlaylistTracks.AnyAsync(t =>
             t.PlaylistId == id &&
@@ -203,8 +203,8 @@ public class PlaylistsController : ControllerBase
             PlaylistId = id,
             Source = source,
             ExternalId = externalId,
-            Title = request.Title.Trim(),
-            Artist = request.Artist.Trim(),
+            Title = title,
+            Artist = artist,
             ArtworkUrl = request.ArtworkUrl,
             DurationMs = request.DurationMs
         };

@@ -162,7 +162,7 @@ public class RadioController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var stationId = request.StationId.Trim();
+        var stationId = request.StationId?.Trim() ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(stationId))
         {

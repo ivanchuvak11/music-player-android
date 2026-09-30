@@ -44,6 +44,37 @@ public class DtoValidationTests
             result.MemberNames.Contains(nameof(AddTrackRequest.DurationMs)));
     }
 
+    [Fact]
+    public void RadioStationDto_falls_back_to_url_when_url_resolved_is_empty()
+    {
+        var dto = new MusicPlayer.Api.DTOs.Radio.RadioStationDto
+        {
+            Name = "Test Station",
+            UrlFallback = "http://direct-stream.mp3"
+        };
+
+        Assert.Equal("http://direct-stream.mp3", dto.StreamUrl);
+
+        dto.StreamUrl = "http://resolved-stream.mp3";
+        Assert.Equal("http://resolved-stream.mp3", dto.StreamUrl);
+    }
+
+    [Fact]
+    public void YouTube_source_is_valid_for_playlist_track_request()
+    {
+        var request = new AddTrackRequest
+        {
+            Source = "youtube",
+            ExternalId = "dQw4w9WgXcQ",
+            Title = "Never Gonna Give You Up",
+            Artist = "Rick Astley",
+            DurationMs = 213000
+        };
+
+        var results = Validate(request);
+        Assert.Empty(results);
+    }
+
     private static List<ValidationResult> Validate(object instance)
     {
         var results = new List<ValidationResult>();

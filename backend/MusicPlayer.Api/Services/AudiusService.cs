@@ -26,10 +26,10 @@ public class AudiusService
         int limit = 20,
         CancellationToken cancellationToken = default)
     {
-        query = query.Trim();
-
         if (string.IsNullOrWhiteSpace(query))
             return new List<AudiusTrackDto>();
+
+        query = query.Trim();
 
         limit = Math.Clamp(limit, 1, 50);
 
@@ -62,10 +62,10 @@ public class AudiusService
         string trackId,
         CancellationToken cancellationToken = default)
     {
-        trackId = trackId.Trim();
-
         if (string.IsNullOrWhiteSpace(trackId))
             return null;
+
+        trackId = trackId.Trim();
 
         var cacheKey = $"audius:track:{trackId.ToLowerInvariant()}";
 
@@ -81,10 +81,10 @@ public class AudiusService
         string? rangeHeader,
         CancellationToken cancellationToken = default)
     {
-        trackId = trackId.Trim();
-
         if (string.IsNullOrWhiteSpace(trackId))
-            throw new ArgumentException("Track ID is required.");
+            throw new ArgumentException("Track ID is required.", nameof(trackId));
+
+        trackId = trackId.Trim();
 
         using var request = CreateAudiusRequest(
             $"tracks/{Uri.EscapeDataString(trackId)}/stream");

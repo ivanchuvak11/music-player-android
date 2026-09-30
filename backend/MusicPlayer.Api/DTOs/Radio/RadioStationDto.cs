@@ -10,8 +10,17 @@ public class RadioStationDto
     [JsonPropertyName("name")]
     public string Name { get; set; } = string.Empty;
 
+    private string _streamUrl = string.Empty;
+
     [JsonPropertyName("url_resolved")]
-    public string StreamUrl { get; set; } = string.Empty;
+    public string StreamUrl
+    {
+        get => !string.IsNullOrWhiteSpace(_streamUrl) ? _streamUrl : (UrlFallback ?? string.Empty);
+        set => _streamUrl = value;
+    }
+
+    [JsonPropertyName("url")]
+    public string? UrlFallback { get; set; }
 
     [JsonPropertyName("favicon")]
     public string? LogoUrl { get; set; }
