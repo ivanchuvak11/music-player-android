@@ -240,6 +240,7 @@ public class YouTubeService
             // Default fallback locations in working directory or application root
             candidatePaths.Add("cookies.txt");
             candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "cookies.txt"));
+            candidatePaths.Add(Path.Combine("backend", "MusicPlayer.Api", "cookies.txt"));
 
             foreach (var path in candidatePaths)
             {
