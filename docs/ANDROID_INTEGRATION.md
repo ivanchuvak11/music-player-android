@@ -364,7 +364,7 @@ GET /api/audius/tracks/{id}/stream
 
 ## 14. SoundCloud
 
-SoundCloud-код на backend є, але для реальної роботи потрібні `SoundCloud:ClientId` і `SoundCloud:ClientSecret`. Backend сам отримує та повторно використовує короткоживучий access token.
+SoundCloud на backend працює автономно з коробки: backend автоматично виявляє та кешує публічний `client_id` (або використовує `SoundCloud:ClientId` і `SoundCloud:ClientSecret`, якщо вони задані). Публічний пошук і стрімінг не вимагають авторизації.
 
 Endpoint-и:
 

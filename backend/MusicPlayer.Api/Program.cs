@@ -77,12 +77,16 @@ builder.Services.AddHttpClient<AudiusService>(client =>
 
 builder.Services.AddHttpClient<SoundCloudService>(client =>
 {
-    client.BaseAddress = new Uri("https://api.soundcloud.com/");
-    client.Timeout = TimeSpan.FromSeconds(15);
+    client.BaseAddress = new Uri("https://api-v2.soundcloud.com/");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+    client.Timeout = TimeSpan.FromSeconds(20);
 });
 
 builder.Services.AddHttpClient("SoundCloudAuth", client =>
 {
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
@@ -97,8 +101,26 @@ builder.Services.AddHttpClient<YouTubeService>(client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
-var redisConn = builder.Configuration.GetConnectionString("Redis");
-if (!string.IsNullOrEmpty(redisConn))
+var redisConn = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
+var redisHost = redisConn.Split(':')[0];
+var redisPort = redisConn.Contains(':') && int.TryParse(redisConn.Split(':')[1], out var p) ? p : 6379;
+
+bool isRedisAvailable = false;
+try
+{
+    using var tcp = new System.Net.Sockets.TcpClient();
+    var connectTask = tcp.ConnectAsync(redisHost, redisPort);
+    if (connectTask.Wait(TimeSpan.FromMilliseconds(300)))
+    {
+        isRedisAvailable = tcp.Connected;
+    }
+}
+catch
+{
+    isRedisAvailable = false;
+}
+
+if (isRedisAvailable)
 {
     builder.Services.AddStackExchangeRedisCache(options =>
     {
