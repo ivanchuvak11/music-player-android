@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Music Player</string>
+    <string name="app_subtitle">Full audio dashboard: player, auth, radio, Room database</string>
+    <string name="status_online">🟢 Online</string>
+    <string name="status_offline">🔴 Offline</string>
+    <string name="offline_banner_text">You are offline. On-device local music and downloaded tracks are available to play!</string>
+    <string name="offline_error_toast">📡 No internet connection. You can listen to on-device music offline!</string>
+    
+    <!-- Player Controls -->
+    <string name="btn_play">Play</string>
+    <string name="btn_pause">Pause</string>
+    <string name="btn_next">Next</string>
+    <string name="btn_previous">Previous</string>
+    <string name="btn_clear_cache">Clear Cache</string>
+    <string name="btn_play_all">▶ Play All</string>
+    <string name="btn_add_to_playlist">Add</string>
+    <string name="btn_favorite">Favorite</string>
+    <string name="now_playing_title">Now Playing</string>
+    <string name="track_paused_title">Paused</string>
+    <string name="last_played_title">Last Track</string>
+    <string name="no_track_selected">No track selected</string>
+    <string name="press_play_prompt">Tap «▶ Play» to begin</string>
+    
+    <!-- Status -->
+    <string name="status_buffering">⏳ Buffering…</string>
+    <string name="status_playing">▶ Playing</string>
+    <string name="status_paused">⏸ Paused</string>
+    <string name="status_ready">⏸ Ready to play</string>
+    <string name="status_stopped">⏹ Stopped</string>
+    <string name="status_network_error">⚠️ Network error</string>
+
+    <!-- Navigation -->
+    <string name="nav_tracks">Tracks</string>
+    <string name="nav_playlists">Playlists</string>
+    <string name="nav_radio">Radio</string>
+    <string name="nav_favorites">Favorites</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_settings">Settings</string>
+    <string name="search_placeholder">Search songs, artists or radio…</string>
+    
+    <!-- Tabs & Categories -->
+    <string name="tab_all">All</string>
+    <string name="tab_local">Local</string>
+    <string name="tab_online">Online</string>
+    <string name="tab_downloaded">Downloaded</string>
+    <string name="header_on_device">On-device Music</string>
+    <string name="header_favorites">Favorite Tracks</string>
+    <string name="header_history">Recently Played</string>
+    <string name="header_playlists">My Playlists</string>
+    <string name="header_audius_trending">Audius Trending</string>
+    <string name="header_cached_tracks">Saved Tracks</string>
+    <string name="empty_favorites_desc">Songs you mark with ❤️ will be saved here</string>
+    <string name="empty_playlists_desc">Create playlists and add your favorite tracks</string>
+    
+    <!-- Account & Auth -->
+    <string name="account_title">Account &amp; Security</string>
+    <string name="account_guest">Guest (Sign in)</string>
+    <string name="account_logged_in_as">Signed in as:</string>
+    <string name="account_email_hint">Email or Username</string>
+    <string name="account_password_hint">Password</string>
+    <string name="account_login_btn">🔑 Sign In</string>
+    <string name="account_register_btn">📝 Register</string>
+    <string name="account_logout_btn">🚪 Sign Out</string>
+    <string name="account_demo_btn">⚡ Demo credentials (ivan@example.com)</string>
+    <string name="account_credentials_empty">Enter email and password</string>
+
+    <!-- Radio -->
+    <string name="radio_title">Online Radio</string>
+    <string name="radio_live_badge">LIVE 🟢</string>
+
+    <!-- EQ Presets & Effects -->
+    <string name="equalizer_title">Equalizer &amp; Effects</string>
+    <string name="headphones_connected">🎧 Headphones connected</string>
+    <string name="headphones_required">🎧 Headphones only</string>
+    <string name="headphones_warning">Connect headphones (wired, Bluetooth or Type-C) to enable equalizer.</string>
+    <string name="equalizer_enable">Enable Equalizer:</string>
+    <string name="equalizer_reset">🔄 0 dB</string>
+    <string name="equalizer_presets_title">Sound Presets:</string>
+    <string name="equalizer_bass_boost">Bass Boost:</string>
+    <string name="equalizer_bands_title">Frequency Bands (5-band EQ):</string>
+    <string name="preset_flat">Flat</string>
+    <string name="preset_bass">Bass Boost</string>
+    <string name="preset_rock">Rock</string>
+    <string name="preset_pop">Pop</string>
+    <string name="preset_jazz">Jazz</string>
+    <string name="preset_classical">Classical</string>
+    <string name="preset_custom">Custom</string>
+    <string name="equalizer_headphones_toast">🎧 Equalizer requires headphones!</string>
+    <string name="equalizer_enabled_toast">🎚 Equalizer enabled</string>
+    <string name="equalizer_disabled_toast">Equalizer disabled (pure sound)</string>
+
+    <!-- Sleep Timer -->
+    <string name="sleep_timer_title">Sleep Timer</string>
+    <string name="sleep_timer_btn">Sleep</string>
+    <string name="sleep_timer_active">Timer active</string>
+    <string name="sleep_timer_cancel">❌ Cancel Timer</string>
+    <string name="sleep_timer_choose">Choose duration before music stops:</string>
+
+    <!-- Settings & Cache -->
+    <string name="settings_title">Sleep Timer &amp; Cache</string>
+    <string name="settings_cache_label">Audio cache size:</string>
+    <string name="settings_cache_desc">ExoPlayer track auto-caching</string>
+    <string name="settings_clean_btn">Clear</string>
+    <string name="settings_server_label">Backend API URL:</string>
+    <string name="settings_server_btn">OK</string>
+
+    <!-- Selection & Playlist Actions -->
+    <string name="btn_select_multiple">Select Multiple</string>
+    <string name="btn_close_selection">Close</string>
+    <string name="btn_select_all">Select All</string>
+    <string name="btn_deselect_all">Deselect All</string>
+    <string name="btn_clear_history">Clear</string>
+    <string name="create_new_playlist">Create new playlist</string>
+    <string name="new_playlist_hint">New playlist name…</string>
+    <string name="btn_create">Create</string>
+    <string name="empty_playlist_message">Playlist is empty. Add songs here.</string>
+    <string name="btn_close">Close</string>
+
+    <!-- Errors -->
+    <string name="error_network_generic">No network connection</string>
+    <string name="error_jamendo_unavailable">Jamendo service temporarily unavailable</string>
+
+    <!-- Permissions -->
+    <string name="permission_audio_title">Audio files access needed</string>
+    <string name="permission_audio_desc">Audio permission is required to scan and play music from your device.</string>
+    <string name="permission_notification_title">Playback Notifications</string>
+    <string name="permission_notification_desc">Notification permission allows controlling playback from notification bar and lock screen.</string>
+    <string name="permission_bluetooth_title">Bluetooth Connection</string>
+    <string name="permission_bluetooth_desc">Bluetooth permission allows headphones and car controls to interact with the player.</string>
+    <string name="permission_grant">Grant Permission</string>
+    <string name="permission_settings">Open Settings</string>
+</resources>

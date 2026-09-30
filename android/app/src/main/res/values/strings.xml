@@ -5,11 +5,32 @@
     <string name="status_online">🟢 Онлайн</string>
     <string name="status_offline">🔴 Офлайн</string>
     <string name="offline_banner_text">Ви зараз офлайн. Треки з пам\'яті телефону та завантажена музика доступні для прослуховування!</string>
+    <string name="offline_error_toast">📡 Немає зв\'язку з інтернетом. Ви можете слухати музику з пам\'яті телефону офлайн!</string>
+    
+    <!-- Player Controls -->
     <string name="btn_play">Відтворити</string>
     <string name="btn_pause">Пауза</string>
-    <string name="btn_next">Наступний</string>
-    <string name="btn_previous">Попередній</string>
+    <string name="btn_next">Вперед</string>
+    <string name="btn_previous">Назад</string>
     <string name="btn_clear_cache">Очистити кеш</string>
+    <string name="btn_play_all">▶ Грати всі</string>
+    <string name="btn_add_to_playlist">Додати</string>
+    <string name="btn_favorite">Улюблене</string>
+    <string name="now_playing_title">Зараз грає</string>
+    <string name="track_paused_title">На паузі</string>
+    <string name="last_played_title">Остання пісня</string>
+    <string name="no_track_selected">Трек не вибрано</string>
+    <string name="press_play_prompt">Натисніть «▶ Грати» щоб почати</string>
+    
+    <!-- Status -->
+    <string name="status_buffering">⏳ Буферизація…</string>
+    <string name="status_playing">▶ Відтворення</string>
+    <string name="status_paused">⏸ На паузі</string>
+    <string name="status_ready">⏸ Готово до відтворення</string>
+    <string name="status_stopped">⏹ Зупинено</string>
+    <string name="status_network_error">⚠️ Збій мережі</string>
+
+    <!-- Navigation -->
     <string name="nav_tracks">Треки</string>
     <string name="nav_playlists">Плейлисти</string>
     <string name="nav_radio">Радіо</string>
@@ -17,14 +38,47 @@
     <string name="nav_search">Пошук</string>
     <string name="nav_settings">Налаштування</string>
     <string name="search_placeholder">Пошук пісень, авторів чи радіо…</string>
+    
+    <!-- Tabs & Categories -->
     <string name="tab_all">Всі</string>
     <string name="tab_local">Локальні</string>
     <string name="tab_online">Онлайн</string>
     <string name="tab_downloaded">Завантажені</string>
-    <string name="error_network_generic">Немає з\'єднання з мережею</string>
-    <string name="error_jamendo_unavailable">Jamendo сервіс тимчасово недоступний</string>
+    <string name="header_on_device">Музика на пристрої</string>
+    <string name="header_favorites">Улюблені треки</string>
+    <string name="header_history">Нещодавно прослухані</string>
+    <string name="header_playlists">Мої плейлісти</string>
+    <string name="header_audius_trending">Тренди Audius</string>
+    <string name="header_cached_tracks">Збережені треки</string>
+    <string name="empty_favorites_desc">Пісні, які ви відзначите ❤️, зберігатимуться тут</string>
+    <string name="empty_playlists_desc">Створюйте власні добірки та додавайте треки</string>
+    
+    <!-- Account & Auth -->
+    <string name="account_title">Акаунт та безпека</string>
+    <string name="account_guest">Гість (Вхід)</string>
+    <string name="account_logged_in_as">Ви увійшли як:</string>
+    <string name="account_email_hint">Email або Username</string>
+    <string name="account_password_hint">Пароль</string>
+    <string name="account_login_btn">🔑 Увійти</string>
+    <string name="account_register_btn">📝 Реєстрація</string>
+    <string name="account_logout_btn">🚪 Вийти з акаунту</string>
+    <string name="account_demo_btn">⚡ Демо-дані (ivan@example.com)</string>
+    <string name="account_credentials_empty">Введіть email та пароль</string>
 
-    <!-- EQ Presets -->
+    <!-- Radio -->
+    <string name="radio_title">Онлайн-радіо</string>
+    <string name="radio_live_badge">LIVE 🟢</string>
+
+    <!-- EQ Presets & Effects -->
+    <string name="equalizer_title">Еквалайзер та Ефекти</string>
+    <string name="headphones_connected">🎧 Навушники підключено</string>
+    <string name="headphones_required">🎧 Тільки в навушниках</string>
+    <string name="headphones_warning">Підключіть навушники (дротові, Bluetooth або Type-C), щоб увімкнути еквалайзер.</string>
+    <string name="equalizer_enable">Увімкнути еквалайзер:</string>
+    <string name="equalizer_reset">🔄 0 dB</string>
+    <string name="equalizer_presets_title">Пресети звучання:</string>
+    <string name="equalizer_bass_boost">Підсилення басу (Bass Boost):</string>
+    <string name="equalizer_bands_title">Смуги частот (5-смуговий Еквалайзер):</string>
     <string name="preset_flat">Звичайний</string>
     <string name="preset_bass">Підсилений бас</string>
     <string name="preset_rock">Рок</string>
@@ -32,6 +86,40 @@
     <string name="preset_jazz">Джаз</string>
     <string name="preset_classical">Класика</string>
     <string name="preset_custom">Власний</string>
+    <string name="equalizer_headphones_toast">🎧 Еквалайзер можна увімкнути лише з навушниками!</string>
+    <string name="equalizer_enabled_toast">🎚 Еквалайзер увімкнено</string>
+    <string name="equalizer_disabled_toast">Еквалайзер вимкнено (чистий звук)</string>
+
+    <!-- Sleep Timer -->
+    <string name="sleep_timer_title">Таймер сну (Sleep Timer)</string>
+    <string name="sleep_timer_btn">Сон</string>
+    <string name="sleep_timer_active">Таймер активний</string>
+    <string name="sleep_timer_cancel">❌ Вимкнути таймер</string>
+    <string name="sleep_timer_choose">Оберіть час, через який музика автоматично зупиниться:</string>
+
+    <!-- Settings & Cache -->
+    <string name="settings_title">Таймер сну і Кеш</string>
+    <string name="settings_cache_label">Тимчасовий кеш аудіо:</string>
+    <string name="settings_cache_desc">ExoPlayer авто-кешування треків</string>
+    <string name="settings_clean_btn">Очистити</string>
+    <string name="settings_server_label">Адреса бекенд-сервера (API):</string>
+    <string name="settings_server_btn">ОК</string>
+
+    <!-- Selection & Playlist Actions -->
+    <string name="btn_select_multiple">Вибрати кілька</string>
+    <string name="btn_close_selection">Закрити</string>
+    <string name="btn_select_all">Обрати всі</string>
+    <string name="btn_deselect_all">Зняти всі</string>
+    <string name="btn_clear_history">Очистити</string>
+    <string name="create_new_playlist">Створити новий плейліст</string>
+    <string name="new_playlist_hint">Назва нового плейліста…</string>
+    <string name="btn_create">Створити</string>
+    <string name="empty_playlist_message">Плейліст порожній. Додавайте сюди пісні.</string>
+    <string name="btn_close">Закрити</string>
+
+    <!-- Errors -->
+    <string name="error_network_generic">Немає з\'єднання з мережею</string>
+    <string name="error_jamendo_unavailable">Jamendo сервіс тимчасово недоступний</string>
 
     <!-- Permissions -->
     <string name="permission_audio_title">Потрібен доступ до аудіофайлів</string>
