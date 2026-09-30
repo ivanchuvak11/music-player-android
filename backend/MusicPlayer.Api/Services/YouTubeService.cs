@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using MusicPlayer.Api.DTOs.YouTube;
 using MusicPlayer.Api.Infrastructure;
@@ -19,12 +20,17 @@ public class YouTubeService
     public YouTubeService(
         HttpClient httpClient,
         CacheService cache,
-        ILogger<YouTubeService> logger)
+        ILogger<YouTubeService> logger,
+        IConfiguration? configuration = null)
     {
         _httpClient = httpClient;
-        _youtube = new YoutubeClient(httpClient);
         _cache = cache;
         _logger = logger;
+
+        var cookies = LoadCookies(configuration, logger);
+        _youtube = cookies != null && cookies.Count > 0
+            ? new YoutubeClient(httpClient, cookies)
+            : new YoutubeClient(httpClient);
     }
 
     public async Task<List<YouTubeTrackDto>> SearchAsync(
@@ -201,9 +207,59 @@ public class YouTubeService
             Title = video.Title,
             Artist = video.Author.ChannelTitle,
             ArtworkUrl = artworkUrl,
-            DurationMs = video.Duration.HasValue ? (long)video.Duration.Value.TotalMilliseconds : null,
             YouTubeUrl = video.Url,
             StreamUrl = $"/api/youtube/tracks/{id}/stream"
         };
+    }
+
+    private static IReadOnlyList<Cookie>? LoadCookies(
+        IConfiguration? configuration,
+        ILogger<YouTubeService> logger)
+    {
+        try
+        {
+            // 1. Check raw cookies content in configuration / env var (e.g. YouTube__Cookies)
+            var rawCookies = configuration?["YouTube:Cookies"];
+            if (!string.IsNullOrWhiteSpace(rawCookies))
+            {
+                var parsed = NetscapeCookieParser.Parse(rawCookies);
+                if (parsed.Count > 0)
+                {
+                    logger.LogInformation("Loaded {Count} YouTube cookies from configuration.", parsed.Count);
+                    return parsed;
+                }
+            }
+
+            // 2. Check cookies file path from configuration (e.g. YouTube:CookiesPath)
+            var configuredPath = configuration?["YouTube:CookiesPath"];
+            var candidatePaths = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(configuredPath))
+                candidatePaths.Add(configuredPath);
+
+            // Default fallback locations in working directory or application root
+            candidatePaths.Add("cookies.txt");
+            candidatePaths.Add(Path.Combine(AppContext.BaseDirectory, "cookies.txt"));
+
+            foreach (var path in candidatePaths)
+            {
+                if (File.Exists(path))
+                {
+                    var fileContent = File.ReadAllText(path);
+                    var parsed = NetscapeCookieParser.Parse(fileContent);
+                    if (parsed.Count > 0)
+                    {
+                        logger.LogInformation("Loaded {Count} YouTube cookies from file '{Path}'.", parsed.Count, path);
+                        return parsed;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to load YouTube cookies.");
+        }
+
+        return null;
     }
 }
