@@ -68,12 +68,16 @@ builder.Services.AddHttpClient<AudiusService>(client =>
 
 builder.Services.AddHttpClient<SoundCloudService>(client =>
 {
-    client.BaseAddress = new Uri("https://api.soundcloud.com/");
-    client.Timeout = TimeSpan.FromSeconds(15);
+    client.BaseAddress = new Uri("https://api-v2.soundcloud.com/");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+    client.Timeout = TimeSpan.FromSeconds(20);
 });
 
 builder.Services.AddHttpClient("SoundCloudAuth", client =>
 {
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 

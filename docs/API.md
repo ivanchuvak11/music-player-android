@@ -302,11 +302,11 @@ Android-застосунок може використовувати цей endp
 
 SoundCloud використовується як додаткове зовнішнє джерело музичних треків.
 
-Усі SoundCloud endpoint'и потребують JWT-авторизації.
+Публічні SoundCloud endpoint'и (`/search`, `/{id}`, `/{id}/stream`) є відкритими (не потребують JWT-авторизації).
 
-Для роботи потрібні `SoundCloud:ClientId` і `SoundCloud:ClientSecret` у конфігурації backend. Backend отримує OAuth access token через Client Credentials flow та оновлює його після завершення строку дії. `SoundCloud:AccessToken` можна використовувати лише для короткочасного локального тестування.
+Для роботи backend автоматично виявляє, оновлює та кешує публічний `client_id`. Опціонально можна вказати `SoundCloud:ClientId` і `SoundCloud:ClientSecret` у конфігурації backend для OAuth доступу.
 
-Backend повертає тільки треки з доступом `playable`, які можна відтворювати поза SoundCloud. Android UI повинен показувати автора, SoundCloud як джерело та посилання `soundCloudUrl`.
+Backend повертає треки з прямим стрімінгом через `/api/soundcloud/tracks/{id}/stream`. Android UI повинен показувати автора, SoundCloud як джерело та посилання `soundCloudUrl`.
 
 ## Пошук треків SoundCloud
 
