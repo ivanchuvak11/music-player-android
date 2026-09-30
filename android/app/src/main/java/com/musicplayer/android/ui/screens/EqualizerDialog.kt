@@ -1,11 +1,17 @@
 package com.musicplayer.android.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -23,6 +29,7 @@ import com.musicplayer.android.core.audio.AudioEffectsState
 import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 import com.musicplayer.android.ui.theme.DarkRefTheme
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EqualizerDialog(
     viewModel: MainPlayerViewModel,
@@ -39,32 +46,68 @@ fun EqualizerDialog(
                 .fillMaxHeight(0.85f)
                 .clip(RoundedCornerShape(24.dp))
                 .background(DarkRefTheme.SurfaceCard)
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
                 .padding(20.dp)
         ) {
-            // Header
+            // Header with Equalizer icon
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = stringResource(R.string.equalizer_title),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        color = DarkRefTheme.TextPrimary
-                    )
-                    Text(
-                        text = if (audioEffectsState.isHeadphonesConnected)
-                            stringResource(R.string.headphones_connected)
-                        else
-                            stringResource(R.string.headphones_required),
-                        fontSize = 11.sp,
-                        color = if (audioEffectsState.isHeadphonesConnected)
-                            Color(0xFF00E676)
-                        else
-                            DarkRefTheme.AccentPink
-                    )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(DarkRefTheme.AccentMint.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Tune,
+                            contentDescription = null,
+                            tint = DarkRefTheme.AccentMint,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = stringResource(R.string.equalizer_title),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp,
+                            color = DarkRefTheme.TextPrimary
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (audioEffectsState.isHeadphonesConnected)
+                                    Icons.Rounded.Headphones
+                                else
+                                    Icons.Rounded.HeadphonesBattery,
+                                contentDescription = null,
+                                tint = if (audioEffectsState.isHeadphonesConnected)
+                                    DarkRefTheme.AccentMint
+                                else
+                                    DarkRefTheme.AccentPink,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (audioEffectsState.isHeadphonesConnected)
+                                    stringResource(R.string.headphones_connected)
+                                else
+                                    stringResource(R.string.headphones_required),
+                                fontSize = 11.sp,
+                                color = if (audioEffectsState.isHeadphonesConnected)
+                                    DarkRefTheme.AccentMint
+                                else
+                                    DarkRefTheme.AccentPink
+                            )
+                        }
+                    }
                 }
 
                 Switch(
@@ -95,8 +138,10 @@ fun EqualizerDialog(
                         }
                     },
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = DarkRefTheme.TextPrimary,
-                        checkedTrackColor = Color.White.copy(alpha = 0.4f)
+                        checkedThumbColor = DarkRefTheme.BackgroundDark,
+                        checkedTrackColor = DarkRefTheme.AccentMint,
+                        uncheckedThumbColor = DarkRefTheme.TextSecondary,
+                        uncheckedTrackColor = DarkRefTheme.SurfaceCardElevated
                     )
                 )
             }
@@ -107,8 +152,9 @@ fun EqualizerDialog(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(DarkRefTheme.AccentPink.copy(alpha = 0.15f))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkRefTheme.AccentPink.copy(alpha = 0.14f))
+                        .border(1.dp, DarkRefTheme.AccentPink.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
                         .padding(10.dp)
                 ) {
                     Text(
@@ -134,77 +180,138 @@ fun EqualizerDialog(
                     ) {
                         OutlinedButton(
                             onClick = { viewModel.resetEqualizer() },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            modifier = Modifier.height(30.dp)
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = DarkRefTheme.SurfaceCardElevated
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(32.dp)
                         ) {
-                            Text(stringResource(R.string.equalizer_reset), fontSize = 11.sp, color = Color.White)
+                            Icon(
+                                imageVector = Icons.Rounded.RestartAlt,
+                                contentDescription = null,
+                                tint = DarkRefTheme.TextSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = stringResource(R.string.equalizer_reset),
+                                fontSize = 11.sp,
+                                color = DarkRefTheme.TextPrimary
+                            )
                         }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
                     // Presets
-                    Text(
-                        text = stringResource(R.string.equalizer_presets_title),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = DarkRefTheme.TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        AudioEffectsState.AVAILABLE_PRESETS.take(4).forEach { preset ->
-                            FilterChip(
-                                selected = audioEffectsState.currentPreset == preset,
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = DarkRefTheme.AccentMint,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.equalizer_presets_title),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = DarkRefTheme.TextPrimary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // FlowRow ensures chips wrap properly across any screen width with zero cutoffs
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        maxItemsInEachRow = 3
+                    ) {
+                        AudioEffectsState.AVAILABLE_PRESETS.forEach { preset ->
+                            val isSelected = audioEffectsState.currentPreset == preset
+                            Surface(
                                 onClick = { viewModel.setEqualizerPreset(preset) },
-                                label = { Text(preset, fontSize = 10.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color.White.copy(alpha = 0.25f),
-                                    selectedLabelColor = Color.White
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isSelected) DarkRefTheme.AccentMint.copy(alpha = 0.20f) else DarkRefTheme.SurfaceCardElevated,
+                                border = BorderStroke(
+                                    1.dp,
+                                    if (isSelected) DarkRefTheme.AccentMint.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.08f)
                                 )
-                            )
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = when (preset) {
+                                            AudioEffectsState.PRESET_FLAT -> Icons.Rounded.GraphicEq
+                                            AudioEffectsState.PRESET_BASS -> Icons.Rounded.Speaker
+                                            AudioEffectsState.PRESET_ROCK -> Icons.Rounded.ElectricBolt
+                                            AudioEffectsState.PRESET_POP -> Icons.Rounded.Audiotrack
+                                            AudioEffectsState.PRESET_JAZZ -> Icons.Rounded.Piano
+                                            AudioEffectsState.PRESET_CLASSICAL -> Icons.Rounded.LibraryMusic
+                                            else -> Icons.Rounded.Tune
+                                        },
+                                        contentDescription = null,
+                                        tint = if (isSelected) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(
+                                        text = preset,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (isSelected) DarkRefTheme.AccentMint else DarkRefTheme.TextPrimary,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
+                            }
                         }
                     }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        AudioEffectsState.AVAILABLE_PRESETS.drop(4).forEach { preset ->
-                            FilterChip(
-                                selected = audioEffectsState.currentPreset == preset,
-                                onClick = { viewModel.setEqualizerPreset(preset) },
-                                label = { Text(preset, fontSize = 10.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = Color.White.copy(alpha = 0.25f),
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                        }
-                    }
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                    // Bass Boost
+                    // Bass Boost Section
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = stringResource(R.string.equalizer_bass_boost),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = DarkRefTheme.TextPrimary
-                        )
-                        Text(
-                            text = "${audioEffectsState.bassBoostStrength / 10}%",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
+                                contentDescription = null,
+                                tint = DarkRefTheme.AccentMint,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = stringResource(R.string.equalizer_bass_boost),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = DarkRefTheme.TextPrimary
+                            )
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = DarkRefTheme.AccentMint.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = "${audioEffectsState.bassBoostStrength / 10}%",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DarkRefTheme.AccentMint,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                     Slider(
                         value = audioEffectsState.bassBoostStrength.toFloat(),
@@ -212,20 +319,32 @@ fun EqualizerDialog(
                         valueRange = 0f..1000f,
                         modifier = Modifier.fillMaxWidth(),
                         colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.White
+                            thumbColor = DarkRefTheme.AccentMint,
+                            activeTrackColor = DarkRefTheme.AccentMint,
+                            inactiveTrackColor = Color.White.copy(alpha = 0.15f)
                         )
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Frequency Bands
-                    Text(
-                        text = stringResource(R.string.equalizer_bands_title),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = DarkRefTheme.TextPrimary
-                    )
+                    // Frequency Bands Section
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Equalizer,
+                            contentDescription = null,
+                            tint = DarkRefTheme.AccentMint,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.equalizer_bands_title),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = DarkRefTheme.TextPrimary
+                        )
+                    }
                     Spacer(modifier = Modifier.height(6.dp))
 
                     for (i in 0 until audioEffectsState.numberOfBands) {
@@ -235,13 +354,22 @@ fun EqualizerDialog(
                         val dbValue = level.toFloat() / 100f
                         val dbText = if (dbValue >= 0f) "+${"%.1f".format(dbValue)} dB" else "${"%.1f".format(dbValue)} dB"
 
-                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 3.dp)
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(label, fontSize = 11.sp, color = DarkRefTheme.TextSecondary)
-                                Text(dbText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text(
+                                    text = dbText,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (level != 0.toShort()) DarkRefTheme.AccentMint else Color.White
+                                )
                             }
                             Slider(
                                 value = level.toFloat().coerceIn(audioEffectsState.minBandLevel.toFloat(), audioEffectsState.maxBandLevel.toFloat()),
@@ -251,8 +379,9 @@ fun EqualizerDialog(
                                 valueRange = audioEffectsState.minBandLevel.toFloat()..audioEffectsState.maxBandLevel.toFloat(),
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = SliderDefaults.colors(
-                                    thumbColor = Color.White,
-                                    activeTrackColor = Color.White
+                                    thumbColor = DarkRefTheme.AccentMint,
+                                    activeTrackColor = DarkRefTheme.AccentMint,
+                                    inactiveTrackColor = Color.White.copy(alpha = 0.15f)
                                 )
                             )
                         }
@@ -275,11 +404,23 @@ fun EqualizerDialog(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            TextButton(
+            Surface(
                 onClick = onDismiss,
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+                shape = RoundedCornerShape(14.dp),
+                color = DarkRefTheme.SurfaceCardElevated,
+                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
             ) {
-                Text(stringResource(R.string.btn_close), color = DarkRefTheme.TextSecondary)
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = stringResource(R.string.btn_close),
+                        color = DarkRefTheme.TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
     }

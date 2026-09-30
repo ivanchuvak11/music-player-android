@@ -27,8 +27,8 @@ fun AppTopBar(
     currentUser: String?,
     isOnline: Boolean,
     onAccountClick: () -> Unit,
-    onEqualizerClick: () -> Unit,
-    onSettingsClick: () -> Unit,
+    onEqualizerClick: (() -> Unit)? = null,
+    onSettingsClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -68,43 +68,47 @@ fun AppTopBar(
             }
         }
 
-        // TOP-RIGHT: Tools (Equalizer, Settings)
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Equalizer button
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(DarkRefTheme.SurfaceCardElevated)
-                    .clickable { onEqualizerClick() },
-                contentAlignment = Alignment.Center
+        // TOP-RIGHT: Tools (Equalizer, Settings) - only rendered if actions are provided
+        if (onEqualizerClick != null || onSettingsClick != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Tune,
-                    contentDescription = "Equalizer",
-                    tint = DarkRefTheme.TextPrimary,
-                    modifier = Modifier.size(19.dp)
-                )
-            }
+                if (onEqualizerClick != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(DarkRefTheme.SurfaceCardElevated)
+                            .clickable { onEqualizerClick() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Tune,
+                            contentDescription = "Equalizer",
+                            tint = DarkRefTheme.TextPrimary,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
 
-            // Settings button
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .background(DarkRefTheme.SurfaceCardElevated)
-                    .clickable { onSettingsClick() },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Settings,
-                    contentDescription = "Settings",
-                    tint = DarkRefTheme.TextPrimary,
-                    modifier = Modifier.size(19.dp)
-                )
+                if (onSettingsClick != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(DarkRefTheme.SurfaceCardElevated)
+                            .clickable { onSettingsClick() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Settings,
+                            contentDescription = "Settings",
+                            tint = DarkRefTheme.TextPrimary,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
             }
         }
     }
