@@ -201,14 +201,18 @@ public class AudiusService
     {
         var apiKey = _configuration["Audius:ApiKey"];
 
-        if (string.IsNullOrWhiteSpace(apiKey))
-            throw new ExternalServiceConfigurationException(
-                "Audius API key is not configured.");
+        var separator = url.Contains('?') ? "&" : "?";
+        var requestUrl = url.Contains("app_name=")
+            ? url
+            : $"{url}{separator}app_name=MusicPlayerAndroid";
 
-        var request = new HttpRequestMessage(HttpMethod.Get, url);
+        var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
 
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", apiKey);
+        if (!string.IsNullOrWhiteSpace(apiKey))
+        {
+            request.Headers.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+        }
 
         return request;
     }
@@ -265,7 +269,10 @@ public class AudiusService
             Title = title,
             Artist = artist,
             ArtworkUrl = artworkUrl,
-            DurationMs = durationMs
+            DurationMs = durationMs,
+            StreamUrl = string.IsNullOrWhiteSpace(id)
+                ? null
+                : $"/api/audius/tracks/{id}/stream"
         };
     }
 }
