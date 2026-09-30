@@ -210,6 +210,7 @@ class MainPlayerViewModel(
                 localScanner.observeMediaChanges()
                     .debounce(1500L)
                     .collect {
+                        com.musicplayer.android.core.audio.AudioArtworkFetcher.clearCache()
                         loadLocalTracks()
                     }
             } catch (e: Exception) {

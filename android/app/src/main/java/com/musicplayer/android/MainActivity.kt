@@ -167,6 +167,9 @@ fun PlayerCoreScreen() {
     val sortedFavorites = remember(localFavorites, trackSortOrder) {
         localFavorites.map { it.toAudioTrack() }.sortedByOrder(trackSortOrder)
     }
+    val favoriteTrackIds = remember(localFavorites) {
+        localFavorites.map { it.id }.toHashSet()
+    }
 
     // Sync radio index
     LaunchedEffect(currentPlayingTrack) {
@@ -313,7 +316,7 @@ fun PlayerCoreScreen() {
                             TrackItemRow(
                                 track = track,
                                 onPlay = { viewModel.playLocalTrack(track) },
-                                isFavorite = localFavorites.any { it.id == track.id },
+                                isFavorite = track.id in favoriteTrackIds,
                                 isPlayingThisTrack = currentPlayingTrack?.id == track.id,
                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                 onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
@@ -344,7 +347,7 @@ fun PlayerCoreScreen() {
                             TrackItemRow(
                                 track = track,
                                 onPlay = { playOnlineSafely { viewModel.playTrack(track) } },
-                                isFavorite = localFavorites.any { it.id == track.id },
+                                isFavorite = track.id in favoriteTrackIds,
                                 isPlayingThisTrack = currentPlayingTrack?.id == track.id,
                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                 onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
@@ -446,7 +449,7 @@ fun PlayerCoreScreen() {
                                     TrackItemRow(
                                         track = track,
                                         onPlay = { viewModel.playTrack(track) },
-                                        isFavorite = localFavorites.any { it.id == track.id },
+                                        isFavorite = track.id in favoriteTrackIds,
                                         isPlayingThisTrack = currentPlayingTrack?.id == track.id,
                                         onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                         onTrackCardClick = {
@@ -791,7 +794,7 @@ fun PlayerCoreScreen() {
                                                 },
                                                 isSelectionMode = isMultiSelectMode,
                                                 isSelected = isSelected,
-                                                isFavorite = localFavorites.any { it.id == track.id },
+                                                isFavorite = track.id in favoriteTrackIds,
                                                 isPlayingThisTrack = currentPlayingTrack?.id == track.id,
                                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                                 onToggleSelect = {
@@ -1262,7 +1265,7 @@ fun PlayerCoreScreen() {
                             rememberedPosition = rememberedPosition,
                             isSleepTimerActive = isSleepTimerActive,
                             sleepTimerRemainingSeconds = sleepTimerRemainingSeconds,
-                            isFavorite = localFavorites.any { it.id == currentOrRememberedTrack.id },
+                            isFavorite = currentOrRememberedTrack.id in favoriteTrackIds,
                             onExpandNowPlaying = { showNowPlayingSheet = true }
                         )
                     }
