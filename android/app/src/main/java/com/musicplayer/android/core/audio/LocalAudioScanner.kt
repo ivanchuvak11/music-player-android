@@ -134,7 +134,12 @@ class LocalAudioScanner(private val context: Context) {
                         ContentUris.withAppendedId(artworkUriBase, albumId)
                     } else null
 
-                    val resolvedArtworkUrl = albumArtUri?.toString() ?: contentUri.toString()
+                    // Android 10+ (Q+) uses contentUri for ContentResolver.loadThumbnail, while older APIs may have albumArtUri
+                    val resolvedArtworkUrl = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        contentUri.toString()
+                    } else {
+                        albumArtUri?.toString() ?: contentUri.toString()
+                    }
 
                     tracks.add(
                         AudioTrack(

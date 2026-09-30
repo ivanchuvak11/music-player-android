@@ -2,6 +2,7 @@ package com.musicplayer.android.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,6 +25,14 @@ import coil.request.CachePolicy
 import coil.request.ImageRequest
 import com.musicplayer.android.ui.theme.DarkRefTheme
 
+/**
+ * Lightweight, zero-jank track artwork thumbnail composable.
+ *
+ * Designed for 120 FPS LazyColumn scrolling:
+ * - Single Box node (zero redundant layout nesting).
+ * - crossfade(false) disables expensive alpha transitions during flings.
+ * - Memory & disk caching enabled for instant frame delivery.
+ */
 @Composable
 fun TrackArtwork(
     artworkUrl: String?,
@@ -39,6 +48,15 @@ fun TrackArtwork(
             .background(DarkRefTheme.SurfaceCardElevated),
         contentAlignment = Alignment.Center
     ) {
+        // Fallback vector icon
+        Icon(
+            imageVector = if (isLiveStream) Icons.Rounded.Radio else Icons.Rounded.MusicNote,
+            contentDescription = null,
+            tint = if (isLiveStream) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
+            modifier = Modifier.size(size * 0.44f)
+        )
+
+        // Async cover image
         if (!artworkUrl.isNullOrBlank()) {
             val context = LocalContext.current
             val sizePx = with(LocalDensity.current) { size.roundToPx() }
@@ -48,41 +66,16 @@ fun TrackArtwork(
                     .size(sizePx, sizePx)
                     .memoryCachePolicy(CachePolicy.ENABLED)
                     .diskCachePolicy(CachePolicy.ENABLED)
+                    .crossfade(false)
                     .build()
             }
-
-            ArtworkPlaceholder(isLiveStream = isLiveStream, size = size)
 
             AsyncImage(
                 model = request,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(size)
-                    .clip(shape)
+                modifier = Modifier.fillMaxSize()
             )
-        } else {
-            ArtworkPlaceholder(isLiveStream = isLiveStream, size = size)
         }
-    }
-}
-
-@Composable
-private fun ArtworkPlaceholder(
-    isLiveStream: Boolean,
-    size: Dp
-) {
-    Box(
-        modifier = Modifier
-            .size(size)
-            .background(DarkRefTheme.SurfaceCardElevated),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = if (isLiveStream) Icons.Rounded.Radio else Icons.Rounded.MusicNote,
-            contentDescription = null,
-            tint = if (isLiveStream) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
-            modifier = Modifier.size(size * 0.44f)
-        )
     }
 }

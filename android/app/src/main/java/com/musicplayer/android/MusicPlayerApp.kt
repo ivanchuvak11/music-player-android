@@ -32,6 +32,9 @@ class MusicPlayerApp : Application(), ImageLoaderFactory {
                     .maxSizeBytes(64L * 1024 * 1024)
                     .build()
             }
+            .components {
+                add(com.musicplayer.android.core.audio.AudioArtworkFetcher.Factory(this@MusicPlayerApp))
+            }
             .respectCacheHeaders(false)
             .build()
     }
