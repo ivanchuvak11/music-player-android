@@ -20,6 +20,7 @@ public class AudiusController : ControllerBase
 
     // GET /api/audius/search?q=electronic&limit=10
     [HttpGet("search")]
+    [AllowAnonymous]
     public async Task<IActionResult> Search(
         [FromQuery] string q,
         [FromQuery] int limit = 20,
@@ -40,6 +41,7 @@ public class AudiusController : ControllerBase
 
     // GET /api/audius/trending?limit=10
     [HttpGet("trending")]
+    [AllowAnonymous]
     public async Task<IActionResult> Trending(
         [FromQuery] int limit = 20,
         CancellationToken cancellationToken = default)
@@ -51,6 +53,7 @@ public class AudiusController : ControllerBase
 
     // GET /api/audius/tracks/{id}
     [HttpGet("tracks/{id}")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetTrack(
         string id,
         CancellationToken cancellationToken)
@@ -78,6 +81,7 @@ public class AudiusController : ControllerBase
 
     // GET /api/audius/tracks/{id}/stream
     [HttpGet("tracks/{id}/stream")]
+    [AllowAnonymous]
     [EnableRateLimiting("stream")]
     public async Task<IActionResult> Stream(
         string id,

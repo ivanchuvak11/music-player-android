@@ -20,6 +20,7 @@ public class YouTubeController : ControllerBase
 
     // GET /api/youtube/search?q=rock&limit=10
     [HttpGet("search")]
+    [AllowAnonymous]
     public async Task<IActionResult> Search(
         [FromQuery] string q,
         [FromQuery] int limit = 20,
@@ -40,6 +41,7 @@ public class YouTubeController : ControllerBase
 
     // GET /api/youtube/tracks/{id}
     [HttpGet("tracks/{id}")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetTrack(
         string id,
         CancellationToken cancellationToken)
@@ -67,6 +69,7 @@ public class YouTubeController : ControllerBase
 
     // GET /api/youtube/tracks/{id}/stream
     [HttpGet("tracks/{id}/stream")]
+    [AllowAnonymous]
     [EnableRateLimiting("stream")]
     public async Task<IActionResult> Stream(
         string id,

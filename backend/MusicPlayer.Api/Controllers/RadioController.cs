@@ -36,6 +36,7 @@ public class RadioController : ControllerBase
 
     // GET /api/radio/search?q=rock&countryCode=UA&genre=jazz
     [HttpGet("search")]
+    [AllowAnonymous]
     public async Task<IActionResult> Search(
         [FromQuery] string? q,
         [FromQuery] string? countryCode,
@@ -65,6 +66,7 @@ public class RadioController : ControllerBase
 
     // GET /api/radio/popular?limit=20
     [HttpGet("popular")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetPopular(
         [FromQuery] int limit = 20,
         CancellationToken cancellationToken = default)
@@ -78,6 +80,7 @@ public class RadioController : ControllerBase
 
     // GET /api/radio/by-country/UA?limit=20
     [HttpGet("by-country/{countryCode}")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetByCountry(
         string countryCode,
         [FromQuery] int limit = 20,
@@ -101,6 +104,7 @@ public class RadioController : ControllerBase
 
     // GET /api/radio/by-genre/jazz?limit=20
     [HttpGet("by-genre/{genre}")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetByGenre(
         string genre,
         [FromQuery] int limit = 20,

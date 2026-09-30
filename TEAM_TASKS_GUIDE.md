@@ -40,13 +40,19 @@
   - При логіні повертати пару: `{ accessToken: string, refreshToken: string, expiresIn: number }`.
   - Це дозволить реалізувати автовідновлення сесії через `OkHttp Authenticator`.
 
-### Пріоритет 2: Публічний пошук треків без авторизації
-* **Проблема:** Зараз ендпоінти пошуку Jamendo/Audius (`/api/jamendo/search`, `/api/audius/search`) вимагають заголовок `[Authorize]`. Користувач не може шукати музику до реєстрації.
-* **Що зробити:**
-  - Дозволити анонімний доступ (`[AllowAnonymous]`) до каталогів публічної музики та радіостанцій:
-    - `GET /api/jamendo/search`
-    - `GET /api/audius/search`
-    - `GET /api/radio/search`, `GET /api/radio/by-country/{countryCode}`
+### Пріоритет 2: Публічний пошук треків без авторизації [РЕАЛІЗОВАНО ✅]
+* **Статус:** Виконано. Додано атрибут `[AllowAnonymous]` на всі ендпоінти пошуку та стрімінгу публічних джерел (Jamendo, Audius, SoundCloud, Radio Browser та YouTube).
+* **Що тепер доступно без авторизації:**
+  - `GET /api/jamendo/search`, `GET /api/jamendo/tracks/{id}`, `GET /api/jamendo/tracks/{id}/stream`
+  - `GET /api/youtube/search`, `GET /api/youtube/tracks/{id}`, `GET /api/youtube/tracks/{id}/stream`
+  - `GET /api/audius/search`, `GET /api/audius/trending`, `GET /api/audius/tracks/{id}`, `GET /api/audius/tracks/{id}/stream`
+  - `GET /api/radio/search`, `GET /api/radio/popular`, `GET /api/radio/by-country/{countryCode}`, `GET /api/radio/by-genre/{genre}`
+  - `GET /api/soundcloud/search`, `GET /api/soundcloud/tracks/{id}`, `GET /api/soundcloud/tracks/{id}/stream`
+* **Що залишається під захистом JWT (`[Authorize]`):**
+  - Плейлисти користувача (`/api/playlists/**`)
+  - Улюблені треки (`/api/favorites/**`)
+  - Улюблені радіостанції (`/api/radio/favorites/**`)
+  - Профіль поточного користувача (`/api/users/me`)
 
 ### Пріоритет 3: Повернення прямого посилання на стрім (Direct Stream URL)
 * **Проблема:** Якщо бекенд не повертає `streamUrl` у JSON для треків Jamendo, Android-клієнт намагається тягнути потік через проксі бекенду `/api/jamendo/tracks/{id}/stream`. Якщо бекенд локальний або вимкнений, музика не грає.
