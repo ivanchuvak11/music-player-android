@@ -168,9 +168,21 @@ class SessionManager(context: Context) {
         } catch (e: Exception) {
             false
         }
-        // In release builds, prevent insecure cleartext HTTP URLs
-        if (!isDebug && !normalized.startsWith("https://")) {
-            Log.w(TAG, "Rejecting insecure cleartext HTTP URL in release build: $normalized")
+        val uriHost = try {
+            java.net.URI(normalized).host.orEmpty()
+        } catch (e: Exception) {
+            ""
+        }
+        val isLocalOrPrivateIp = uriHost == "localhost" ||
+            uriHost == "10.0.2.2" ||
+            uriHost == "127.0.0.1" ||
+            uriHost.startsWith("192.168.") ||
+            uriHost.startsWith("10.") ||
+            uriHost.matches(Regex("""^172\.(1[6-9]|2[0-9]|3[0-1])\..*"""))
+
+        // In release builds, only prevent public cleartext HTTP URLs, but allow local Wi-Fi / dev IPs
+        if (!isDebug && !normalized.startsWith("https://") && !isLocalOrPrivateIp) {
+            Log.w(TAG, "Rejecting insecure public cleartext HTTP URL in release build: $normalized")
             return
         }
         if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) return

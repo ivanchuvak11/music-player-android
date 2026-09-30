@@ -57,7 +57,7 @@ class PlayerControllerImpl(
     private var pendingSeekPositionMs: Long? = null
 
     // Fix #3: pending queue/play stored when controller not yet connected
-    private data class PendingQueue(val tracks: List<AudioTrack>, val startIndex: Int, val autoPlay: Boolean)
+    private data class PendingQueue(val tracks: List<AudioTrack>, val startIndex: Int, val autoPlay: Boolean, val startPositionMs: Long = 0L)
     private var pendingQueue: PendingQueue? = null
 
     // Fix #6: consecutive error counter to break infinite skip loops
@@ -108,6 +108,9 @@ class PlayerControllerImpl(
                 // Fix #3: Replay pending setQueue call now that controller is ready
                 pendingQueue?.let { pq ->
                     pendingQueue = null
+                    if (pq.startPositionMs > 0L) {
+                        pendingSeekPositionMs = pq.startPositionMs
+                    }
                     setQueue(pq.tracks, pq.startIndex, pq.autoPlay)
                 }
             } catch (e: Exception) {
@@ -331,12 +334,12 @@ class PlayerControllerImpl(
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         val mediaItems = tracks.map { it.toMediaItem() }
         val controller = mediaController
+        val startPos = pendingSeekPositionMs ?: 0L
         if (controller == null) {
             // Fix #3: Store for replay when controller becomes available
-            pendingQueue = PendingQueue(tracks, startIndex, autoPlay)
+            pendingQueue = PendingQueue(tracks, startIndex, autoPlay, startPos)
             return
         }
-        val startPos = pendingSeekPositionMs ?: 0L
         pendingSeekPositionMs = null
         controller.setMediaItems(mediaItems, startIndex, startPos)
         controller.prepare()
@@ -346,8 +349,11 @@ class PlayerControllerImpl(
         updateState()
     }
 
-    override fun playTrack(track: AudioTrack) {
+    override fun playTrack(track: AudioTrack, startPositionMs: Long) {
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
+        if (startPositionMs > 0L) {
+            pendingSeekPositionMs = startPositionMs
+        }
         val existingIndex = currentQueue.indexOfFirst { it.id == track.id }
         if (existingIndex >= 0) {
             val controller = mediaController

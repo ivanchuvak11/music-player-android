@@ -25,4 +25,8 @@ interface CachedTrackDao {
 
     @Query("DELETE FROM cached_tracks")
     suspend fun clearAll()
+
+    /** Synchronous snapshot for offline fallback — returns list once, not a reactive stream */
+    @Query("SELECT * FROM cached_tracks ORDER BY cachedAtTimestamp DESC LIMIT 200")
+    suspend fun getAllCachedTracksSync(): List<CachedTrackEntity>
 }

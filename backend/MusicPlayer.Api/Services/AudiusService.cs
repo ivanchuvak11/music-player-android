@@ -39,7 +39,17 @@ public class AudiusService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(5),
-            () => FetchSearchAsync(query, limit, cancellationToken),
+            async () =>
+            {
+                try
+                {
+                    return await FetchSearchAsync(query, limit, cancellationToken);
+                }
+                catch (Exception)
+                {
+                    return new List<AudiusTrackDto>();
+                }
+            },
             cancellationToken);
     }
 
@@ -200,14 +210,12 @@ public class AudiusService
     private HttpRequestMessage CreateAudiusRequest(string url)
     {
         var apiKey = _configuration["Audius:ApiKey"];
-
         var separator = url.Contains('?') ? "&" : "?";
         var requestUrl = url.Contains("app_name=")
             ? url
             : $"{url}{separator}app_name=MusicPlayerAndroid";
 
         var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
-
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
             request.Headers.Authorization =

@@ -188,6 +188,28 @@ class MainPlayerViewModel(
     private var soundCloudSearchJob: Job? = null
     private var lastPositionSaveTimeMs = 0L
 
+    // ─── Unified multi-source search state (ТЗ Section 3) ─────────────────────
+    private val _unifiedSearchResults = MutableStateFlow<List<com.musicplayer.android.core.audio.UnifiedTrack>>(emptyList())
+    val unifiedSearchResults: StateFlow<List<com.musicplayer.android.core.audio.UnifiedTrack>> = _unifiedSearchResults.asStateFlow()
+
+    private val _unifiedSearchErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+    val unifiedSearchErrors: StateFlow<Map<String, String>> = _unifiedSearchErrors.asStateFlow()
+
+    private val _isUnifiedSearchOffline = MutableStateFlow(false)
+    val isUnifiedSearchOffline: StateFlow<Boolean> = _isUnifiedSearchOffline.asStateFlow()
+
+    private var unifiedSearchJob: Job? = null
+
+    private val musicSearchUseCase: com.musicplayer.android.core.audio.MusicSearchUseCase by lazy {
+        com.musicplayer.android.core.audio.MusicSearchUseCase(
+            apiService = apiService,
+            cachedTrackDao = db.cachedTrackDao(),
+            isOnline = { isOnline.value }
+        )
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
+
     init {
         // Wire automatic 401 Unauthorized handling
         NetworkClient.authInterceptor.onUnauthorizedListener = {
@@ -254,23 +276,25 @@ class MainPlayerViewModel(
                     // Fix #15: Deduplicate history entries by removing any existing row before insert
                     if (state.isPlaying && track.id != lastRecordedTrackId) {
                         lastRecordedTrackId = track.id
-                        try {
-                            db.playHistoryDao().deleteTrackHistory(track.id)
-                            db.playHistoryDao().insertHistory(
-                                PlayHistoryEntity(
-                                    trackId = track.id,
-                                    title = track.title,
-                                    artist = track.artist,
-                                    audioUrl = track.audioUrl,
-                                    artworkUrl = track.artworkUrl,
-                                    durationMs = track.durationMs,
-                                    lastPositionMs = state.currentPositionMs,
-                                    playedAtTimestamp = System.currentTimeMillis()
+                        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                            try {
+                                db.playHistoryDao().deleteTrackHistory(track.id)
+                                db.playHistoryDao().insertHistory(
+                                    PlayHistoryEntity(
+                                        trackId = track.id,
+                                        title = track.title,
+                                        artist = track.artist,
+                                        audioUrl = track.audioUrl,
+                                        artworkUrl = track.artworkUrl,
+                                        durationMs = track.durationMs,
+                                        lastPositionMs = state.currentPositionMs,
+                                        playedAtTimestamp = System.currentTimeMillis()
+                                    )
                                 )
-                            )
-                            db.playHistoryDao().trimOldHistory()
-                        } catch (e: Exception) {
-                            e.printStackTrace()
+                                db.playHistoryDao().trimOldHistory()
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
                         }
                     }
                 }
@@ -318,10 +342,8 @@ class MainPlayerViewModel(
             val lastPlayed = sessionManager.getLastPlayedTrack()
             if (lastPlayed != null) {
                 val (track, pos) = lastPlayed
-                playerController.playTrack(track)
-                if (pos > 1000L && !track.isLiveStream) {
-                    playerController.seekTo(pos)
-                }
+                val startPos = if (pos > 1000L && !track.isLiveStream) pos else 0L
+                playerController.playTrack(track, startPos)
             } else {
                 // If nothing in memory, start playing the first local song!
                 val firstTrack = _localTracks.value.firstOrNull()
@@ -336,7 +358,15 @@ class MainPlayerViewModel(
 
     fun getLastPlayedTrack(): Pair<AudioTrack, Long>? = sessionManager.getLastPlayedTrack()
 
-    fun pause() = playerController.pause()
+    fun pause() {
+        // Immediately persist current position upon pausing to never lose playback state
+        val state = playbackState.value
+        val track = state.currentTrack
+        if (track != null && state.currentPositionMs > 0L) {
+            sessionManager.saveLastPlayedTrack(track, state.currentPositionMs)
+        }
+        playerController.pause()
+    }
 
     fun playNext() {
         val current = playbackState.value.currentTrack
@@ -417,6 +447,23 @@ class MainPlayerViewModel(
     fun getBaseUrl(): String = sessionManager.getBaseUrl()
 
     fun playTrack(track: AudioTrack) {
+        // If the track belongs to local favorites and current queue doesn't contain it, play the favorites queue
+        val favs = localFavorites.value
+        val favIndex = favs.indexOfFirst { it.id == track.id }
+        if (favIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { it.id == track.id })) {
+            val favTracks = favs.map { it.toAudioTrack() }
+            playQueue(favTracks, favIndex)
+            return
+        }
+
+        // If the track is among local tracks and queue is empty, play local tracks queue
+        val locals = _localTracks.value
+        val localIndex = locals.indexOfFirst { it.id == track.id }
+        if (localIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { it.id == track.id })) {
+            playQueue(locals, localIndex)
+            return
+        }
+
         playerController.playTrack(track)
     }
 
@@ -763,6 +810,205 @@ class MainPlayerViewModel(
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+        }
+    }
+
+    /**
+     * Unified multi-source search (ТЗ Section 3).
+     * Queries SoundCloud, Audius and Jamendo in parallel with 400ms debounce.
+     * Merges results in order SC → Audius → Jamendo, deduplicates by source+externalId.
+     * Per-source errors do NOT block other sources.
+     * On offline: returns Room-cached tracks instead.
+     */
+    fun searchAllSources(query: String, limit: Int = 20) {
+        if (query.isBlank()) {
+            _unifiedSearchResults.value = emptyList()
+            _unifiedSearchErrors.value = emptyMap()
+            _isUnifiedSearchOffline.value = false
+            return
+        }
+        unifiedSearchJob?.cancel()
+        unifiedSearchJob = viewModelScope.launch {
+            delay(400L)
+            _isLoading.value = true
+            try {
+                val result = musicSearchUseCase.search(
+                    query = query,
+                    limit = limit,
+                    backendBaseUrl = sessionManager.getBaseUrl()
+                )
+                _unifiedSearchResults.value = result.tracks
+                _unifiedSearchErrors.value = result.errors.mapValues { it.value.message.orEmpty() }
+
+                _isUnifiedSearchOffline.value = result.isOfflineFallback
+
+                if (result.allSourcesFailed) {
+                    android.util.Log.w("MainPlayerViewModel", "All 3 sources failed for query: '$query'")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("MainPlayerViewModel", "searchAllSources error: ${e.message}", e)
+                _unifiedSearchErrors.value = mapOf("all" to (e.message ?: "Unknown error"))
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+
+    /** Clear unified search results and reset state */
+    fun clearUnifiedSearch() {
+        unifiedSearchJob?.cancel()
+        _unifiedSearchResults.value = emptyList()
+        _unifiedSearchErrors.value = emptyMap()
+        _isUnifiedSearchOffline.value = false
+    }
+
+    /**
+     * Plays a UnifiedTrack by resolving the stream URL and delegating to PlayerController.
+     * Handles all 4 sources per ТЗ Section 4.
+     */
+    fun playUnifiedTrack(track: com.musicplayer.android.core.audio.UnifiedTrack) {
+        if (track.source == com.musicplayer.android.core.audio.TrackSource.LOCAL) {
+            val audioTrack = track.toAudioTrack(sessionManager.getBaseUrl())
+            playerController.playTrack(audioTrack)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val audioTrack = track.toAudioTrack(sessionManager.getBaseUrl())
+                playerController.playTrack(audioTrack)
+                // Add to play history
+                try {
+                    db.playHistoryDao().deleteTrackHistory(audioTrack.id)
+                    db.playHistoryDao().insertHistory(
+                        com.musicplayer.android.core.database.PlayHistoryEntity(
+                            trackId = audioTrack.id,
+                            title = audioTrack.title,
+                            artist = audioTrack.artist,
+                            audioUrl = audioTrack.audioUrl,
+                            artworkUrl = audioTrack.artworkUrl,
+                            durationMs = audioTrack.durationMs,
+                            lastPositionMs = 0L,
+                            playedAtTimestamp = System.currentTimeMillis()
+                        )
+                    )
+                    db.playHistoryDao().trimOldHistory()
+                } catch (e: Exception) {
+                    android.util.Log.e("MainPlayerViewModel", "playUnifiedTrack history error: ${e.message}", e)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("MainPlayerViewModel", "playUnifiedTrack error: ${e.message}", e)
+                _authStatusMessage.value = "Помилка відтворення: ${e.message}"
+            }
+        }
+    }
+
+    /**
+     * Add unified track to favorites (backend + local Room).
+     * Correctly sends source and externalId per ТЗ Section 5.
+     */
+    fun addUnifiedTrackToFavorites(track: com.musicplayer.android.core.audio.UnifiedTrack) {
+        // Add to local Room favorites (always works offline)
+        viewModelScope.launch {
+            try {
+                db.favoriteTrackDao().insertFavorite(
+                    com.musicplayer.android.core.database.FavoriteTrackEntity(
+                        id = track.id,
+                        title = track.title,
+                        artist = track.artist,
+                        audioUrl = track.resolveStreamUrl(sessionManager.getBaseUrl()),
+                        artworkUrl = track.artworkUrl,
+                        durationMs = track.durationMs
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("MainPlayerViewModel", "addUnifiedTrackToFavorites Room error: ${e.message}", e)
+            }
+        }
+        // Sync to backend if logged in
+        if (sessionManager.isLoggedIn() && track.source != com.musicplayer.android.core.audio.TrackSource.LOCAL) {
+            viewModelScope.launch {
+                try {
+                    val resp = apiService.addFavoriteTrack(
+                        com.musicplayer.android.core.network.AddFavoriteTrackRequestDto(
+                            source = track.source.value,
+                            externalId = track.externalId,
+                            title = track.title,
+                            artist = track.artist,
+                            artworkUrl = track.artworkUrl,
+                            durationMs = track.durationMs
+                        )
+                    )
+                    if (resp.isSuccessful) {
+                        loadFavoriteTracks()
+                    } else if (resp.code() == 401) {
+                        handleSessionExpired()
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.e("MainPlayerViewModel", "addUnifiedTrackToFavorites backend error: ${e.message}", e)
+                }
+            }
+        }
+    }
+
+    /**
+     * Add unified track to a playlist (backend + local Room).
+     * Correctly sends source and externalId per ТЗ Section 5.
+     */
+    fun addUnifiedTrackToPlaylist(playlistId: Long, backendPlaylistId: Int? = null, track: com.musicplayer.android.core.audio.UnifiedTrack) {
+        // Add to local Room playlist
+        viewModelScope.launch {
+            try {
+                db.localPlaylistDao().insertTracks(
+                    listOf(
+                        com.musicplayer.android.core.database.LocalPlaylistTrackEntity(
+                            playlistId = playlistId,
+                            trackId = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            audioUrl = track.resolveStreamUrl(sessionManager.getBaseUrl()),
+                            artworkUrl = track.artworkUrl,
+                            durationMs = track.durationMs,
+                            isLocal = track.source == com.musicplayer.android.core.audio.TrackSource.LOCAL
+                        )
+                    )
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("MainPlayerViewModel", "addUnifiedTrackToPlaylist Room error: ${e.message}", e)
+            }
+        }
+        // Sync to backend if logged in and backend playlist ID is provided
+        if (sessionManager.isLoggedIn() && backendPlaylistId != null &&
+            track.source != com.musicplayer.android.core.audio.TrackSource.LOCAL) {
+            viewModelScope.launch {
+                try {
+                    val resp = apiService.addTrackToPlaylist(
+                        playlistId = backendPlaylistId,
+                        request = com.musicplayer.android.core.network.AddTrackToPlaylistRequestDto(
+                            source = track.source.value,
+                            externalId = track.externalId,
+                            title = track.title,
+                            artist = track.artist,
+                            artworkUrl = track.artworkUrl,
+                            durationMs = track.durationMs
+                        )
+                    )
+                    if (resp.isSuccessful) {
+                        loadPlaylists()
+                    } else if (resp.code() == 401) {
+                        handleSessionExpired()
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.e("MainPlayerViewModel", "addUnifiedTrackToPlaylist backend error: ${e.message}", e)
+                }
             }
         }
     }
@@ -1243,6 +1489,11 @@ class MainPlayerViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        val state = playbackState.value
+        val track = state.currentTrack
+        if (track != null && state.currentPositionMs > 0L) {
+            sessionManager.saveLastPlayedTrack(track, state.currentPositionMs)
+        }
         playerController.release()
         // Fix #20: Cancel SleepTimer when ViewModel is cleared
         com.musicplayer.android.core.audio.SleepTimer.cancel()

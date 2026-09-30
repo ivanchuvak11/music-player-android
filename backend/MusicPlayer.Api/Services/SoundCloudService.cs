@@ -44,7 +44,22 @@ public class SoundCloudService
         return await _cache.GetOrCreateAsync(
             cacheKey,
             TimeSpan.FromMinutes(5),
-            () => FetchSearchAsync(query, limit, cancellationToken),
+            async () =>
+            {
+                try
+                {
+                    return await FetchSearchAsync(query, limit, cancellationToken);
+                }
+                catch (ExternalServiceConfigurationException)
+                {
+                    // SoundCloud credentials not provided in dev environment
+                    return new List<SoundCloudTrackDto>();
+                }
+                catch (Exception)
+                {
+                    return new List<SoundCloudTrackDto>();
+                }
+            },
             cancellationToken);
     }
 
