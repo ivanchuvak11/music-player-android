@@ -16,3 +16,4 @@ ENV ASPNETCORE_ENVIRONMENT=Development
 
 COPY --from=build /app/publish .
 ENTRYPOINT ["dotnet", "MusicPlayer.Api.dll"]
+
