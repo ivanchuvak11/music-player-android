@@ -30,4 +30,12 @@ object ServerConfig {
             "${baseUrl.trimEnd('/')}/api/soundcloud/tracks/$externalId/stream"
         }
     }
+
+    fun resolveYouTubeStreamUrl(externalId: String, streamUrl: String?, baseUrl: String): String {
+        return if (!streamUrl.isNullOrBlank()) {
+            streamUrl
+        } else {
+            "${baseUrl.trimEnd('/')}/api/youtube/tracks/$externalId/stream"
+        }
+    }
 }

@@ -166,3 +166,15 @@ data class SoundCloudTrackDto(
     val soundCloudUrl: String? = null,
     val streamUrl: String? = null
 )
+
+@Serializable
+data class YouTubeTrackDto(
+    val source: String = "youtube",
+    val externalId: String,
+    val title: String,
+    val artist: String,
+    val artworkUrl: String? = null,
+    val durationMs: Long? = null,
+    val youTubeUrl: String? = null,
+    val streamUrl: String? = null
+)

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Production security: By default only HTTPS is allowed -->
-    <base-config cleartextTrafficPermitted="false">
+    <!-- Development & testing: Allow HTTP traffic for local dev servers (LAN IPs) and HTTP radio streams -->
+    <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

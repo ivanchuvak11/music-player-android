@@ -126,6 +126,24 @@ data class AudioTrack(
                 isLiveStream = false
             )
         }
+
+        fun fromYouTube(track: com.musicplayer.android.core.network.YouTubeTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack {
+            val streamUri = com.musicplayer.android.core.network.ServerConfig.resolveYouTubeStreamUrl(
+                track.externalId,
+                track.streamUrl,
+                backendBaseUrl
+            )
+            return AudioTrack(
+                id = "youtube_${track.externalId}",
+                title = track.title,
+                artist = track.artist,
+                audioUrl = streamUri,
+                artworkUrl = track.artworkUrl,
+                durationMs = track.durationMs ?: 0L,
+                isLocal = false,
+                isLiveStream = false
+            )
+        }
     }
 }
 
