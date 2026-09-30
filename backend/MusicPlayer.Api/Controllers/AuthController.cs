@@ -74,6 +74,16 @@ public class AuthController : ControllerBase
 
         _db.Users.Add(user);
 
+        var token = _jwtService.GenerateAccessToken(user);
+        var refreshToken = _jwtService.GenerateRefreshToken();
+
+        _db.RefreshTokens.Add(new RefreshToken
+        {
+            UserId = user.Id,
+            Token = refreshToken,
+            ExpiresAt = DateTime.UtcNow.AddDays(30)
+        });
+
         try
         {
             await _db.SaveChangesAsync();
@@ -93,7 +103,11 @@ public class AuthController : ControllerBase
                 user.Id,
                 user.Username,
                 user.Email,
-                user.CreatedAt
+                user.CreatedAt,
+                Token = token,
+                AccessToken = token,
+                RefreshToken = refreshToken,
+                ExpiresIn = _jwtService.GetAccessTokenExpirationSeconds()
             });
     }
 
@@ -135,14 +149,103 @@ public class AuthController : ControllerBase
             });
         }
 
-        var token = _jwtService.GenerateToken(user);
+        var token = _jwtService.GenerateAccessToken(user);
+        var refreshToken = _jwtService.GenerateRefreshToken();
+
+        _db.RefreshTokens.Add(new RefreshToken
+        {
+            UserId = user.Id,
+            Token = refreshToken,
+            ExpiresAt = DateTime.UtcNow.AddDays(30)
+        });
+
+        await _db.SaveChangesAsync();
 
         return Ok(new AuthResponse
         {
             Token = token,
+            RefreshToken = refreshToken,
+            ExpiresIn = _jwtService.GetAccessTokenExpirationSeconds(),
             UserId = user.Id,
             Username = user.Username,
             Email = user.Email
+        });
+    }
+
+    [HttpPost("refresh")]
+    public async Task<ActionResult<AuthResponse>> Refresh(RefreshTokenRequest request)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.RefreshToken))
+        {
+            return BadRequest(new
+            {
+                message = "Refresh token is required."
+            });
+        }
+
+        var tokenString = request.RefreshToken.Trim();
+        var storedToken = await _db.RefreshTokens
+            .Include(r => r.User)
+            .SingleOrDefaultAsync(r => r.Token == tokenString);
+
+        if (storedToken is null || !storedToken.IsActive)
+        {
+            return Unauthorized(new
+            {
+                message = "Invalid or expired refresh token."
+            });
+        }
+
+        // Token rotation: revoke current token
+        storedToken.RevokedAt = DateTime.UtcNow;
+
+        var newAccessToken = _jwtService.GenerateAccessToken(storedToken.User);
+        var newRefreshToken = _jwtService.GenerateRefreshToken();
+
+        _db.RefreshTokens.Add(new RefreshToken
+        {
+            UserId = storedToken.UserId,
+            Token = newRefreshToken,
+            ExpiresAt = DateTime.UtcNow.AddDays(30)
+        });
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new AuthResponse
+        {
+            Token = newAccessToken,
+            RefreshToken = newRefreshToken,
+            ExpiresIn = _jwtService.GetAccessTokenExpirationSeconds(),
+            UserId = storedToken.User.Id,
+            Username = storedToken.User.Username,
+            Email = storedToken.User.Email
+        });
+    }
+
+    [HttpPost("revoke")]
+    public async Task<IActionResult> Revoke(RefreshTokenRequest request)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.RefreshToken))
+        {
+            return BadRequest(new
+            {
+                message = "Refresh token is required."
+            });
+        }
+
+        var tokenString = request.RefreshToken.Trim();
+        var storedToken = await _db.RefreshTokens
+            .SingleOrDefaultAsync(r => r.Token == tokenString);
+
+        if (storedToken is not null && storedToken.IsActive)
+        {
+            storedToken.RevokedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+        }
+
+        return Ok(new
+        {
+            message = "Token revoked successfully."
         });
     }
 }

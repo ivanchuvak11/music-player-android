@@ -16,10 +16,25 @@ public class AppDbContext : DbContext
     public DbSet<FavoriteTrack> FavoriteTracks => Set<FavoriteTrack>();
     public DbSet<FavoriteRadioStation> FavoriteRadioStations =>
         Set<FavoriteRadioStation>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<RefreshToken>(entity =>
+        {
+            entity.HasIndex(r => r.Token)
+                .IsUnique();
+
+            entity.Property(r => r.Token)
+                .HasMaxLength(256);
+
+            entity.HasOne(r => r.User)
+                .WithMany(u => u.RefreshTokens)
+                .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
 
         // Email повинен бути унікальним
         modelBuilder.Entity<User>()

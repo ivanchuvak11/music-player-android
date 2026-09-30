@@ -10,4 +10,5 @@ public class User
     public List<Playlist> Playlists { get; set; } = new();
     public List<FavoriteTrack> FavoriteTracks { get; set; } = new();
     public List<FavoriteRadioStation> FavoriteRadioStations { get; set; } = new();
+    public List<RefreshToken> RefreshTokens { get; set; } = new();
 }

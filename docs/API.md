@@ -74,7 +74,10 @@ POST /api/auth/login
 
 ```json
 {
-  "token": "<jwt-token>",
+  "token": "<jwt-access-token>",
+  "accessToken": "<jwt-access-token>",
+  "refreshToken": "<secure-refresh-token>",
+  "expiresIn": 7200,
   "userId": 1,
   "username": "ivan",
   "email": "ivan@example.com"
@@ -82,6 +85,64 @@ POST /api/auth/login
 ```
 
 Android-застосунок повинен використовувати отриманий токен для всіх захищених запитів до API.
+
+---
+
+## Оновлення токена (Refresh Token)
+
+Оновлює access-токен за допомогою довгоживучого refresh-токена без необхідності повторного введення логіна та пароля. Підтримує ротацію токенів (при кожному оновленні видається нова пара).
+
+```http
+POST /api/auth/refresh
+```
+
+### Запит
+
+```json
+{
+  "refreshToken": "<secure-refresh-token>"
+}
+```
+
+### Відповідь
+
+```json
+{
+  "token": "<new-jwt-access-token>",
+  "accessToken": "<new-jwt-access-token>",
+  "refreshToken": "<new-secure-refresh-token>",
+  "expiresIn": 7200,
+  "userId": 1,
+  "username": "ivan",
+  "email": "ivan@example.com"
+}
+```
+
+---
+
+## Відкликання токена (Revoke / Logout)
+
+Анулює refresh-токен при виході користувача з акаунту.
+
+```http
+POST /api/auth/revoke
+```
+
+### Запит
+
+```json
+{
+  "refreshToken": "<secure-refresh-token>"
+}
+```
+
+### Відповідь
+
+```json
+{
+  "message": "Token revoked successfully."
+}
+```
 
 ---
 
