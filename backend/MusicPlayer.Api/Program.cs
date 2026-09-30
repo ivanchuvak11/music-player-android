@@ -92,6 +92,12 @@ builder.Services.AddHttpClient<YouTubeService>(client =>
     client.Timeout = TimeSpan.FromSeconds(30);
 });
 
+builder.Services.AddHttpClient<CoverService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("MusicPlayerAndroid/1.0");
+});
+
 var redisConn = builder.Configuration.GetConnectionString("Redis") ?? "localhost:6379";
 var redisHost = redisConn.Split(':')[0];
 var redisPort = redisConn.Contains(':') && int.TryParse(redisConn.Split(':')[1], out var p) ? p : 6379;

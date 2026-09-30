@@ -8,4 +8,5 @@ public class AudiusTrackDto
     public string Artist { get; set; } = string.Empty;
     public string? ArtworkUrl { get; set; }
     public long? DurationMs { get; set; }
+    public string? StreamUrl { get; set; }
 }

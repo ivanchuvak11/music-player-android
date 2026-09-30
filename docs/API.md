@@ -173,9 +173,9 @@ GET /api/users/me
 
 # Audius
 
-Audius використовується як основне зовнішнє джерело музичних треків.
+Audius використовується як додаткове зовнішнє джерело незалежної музики.
 
-Усі Audius endpoint'и потребують JWT-авторизації.
+Публічні Audius endpoint'и (`/search`, `/trending`, `/{id}`, `/{id}/stream`) є відкритими (не потребують JWT-авторизації).
 
 ## Пошук треків
 
@@ -201,7 +201,8 @@ GET /api/audius/search?q=electronic&limit=10
     "title": "Electronic Butterflies",
     "artist": "Seb Park",
     "artworkUrl": "https://example.com/cover.jpg",
-    "durationMs": 117000
+    "durationMs": 117000,
+    "streamUrl": "/api/audius/tracks/abkvg/stream"
   }
 ]
 ```
@@ -428,6 +429,62 @@ GET /api/soundcloud/tracks/123456789/stream
 ```
 
 Android-застосунок може використовувати цей endpoint як джерело аудіо для Media3/ExoPlayer.
+
+---
+
+# Обкладинки альбомів (Covers)
+
+Сервіс пошуку та віддачі якісних квадратних обкладинок альбомів для локальних треків та сторонніх джерел. Використовує iTunes Search API (висока якість 600x600) з автоматичним фолбеком на Deezer API. Результати кешуються на 7 днів.
+
+Не потребує авторизації (`[AllowAnonymous]`).
+
+## Пошук обкладинки (Метадані)
+
+```http
+GET /api/covers/search?artist={artist}&title={title}
+GET /api/covers/search?q={query}
+```
+
+### Приклад
+
+```http
+GET /api/covers/search?artist=Queen&title=Bohemian%20Rhapsody
+```
+
+### Відповідь
+
+```json
+{
+  "artworkUrl": "https://is1-ssl.mzstatic.com/.../100x100bb.jpg",
+  "highResArtworkUrl": "https://is1-ssl.mzstatic.com/.../600x600bb.jpg",
+  "artist": "Queen",
+  "album": "A Night at the Opera",
+  "title": "Bohemian Rhapsody",
+  "source": "itunes"
+}
+```
+
+---
+
+## Пряме посилання на зображення (Direct Image Redirect)
+
+Повертає HTTP 302 Redirect на високоякісну обкладинку. Призначено для використання безпосередньо у Jetpack Compose (`AsyncImage`), Coil або Glide.
+
+```http
+GET /api/covers/image?artist={artist}&title={title}
+GET /api/covers/image?q={query}
+```
+
+### Приклад використання в Compose (Богдан):
+
+```kotlin
+AsyncImage(
+    model = "http://10.0.2.2:5116/api/covers/image?artist=${Uri.encode(track.artist)}&title=${Uri.encode(track.title)}",
+    contentDescription = "Cover",
+    placeholder = painterResource(R.drawable.default_cover),
+    error = painterResource(R.drawable.default_cover)
+)
+```
 
 ---
 

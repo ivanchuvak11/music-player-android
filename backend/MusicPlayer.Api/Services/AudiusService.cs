@@ -265,7 +265,10 @@ public class AudiusService
             Title = title,
             Artist = artist,
             ArtworkUrl = artworkUrl,
-            DurationMs = durationMs
+            DurationMs = durationMs,
+            StreamUrl = string.IsNullOrWhiteSpace(id)
+                ? null
+                : $"/api/audius/tracks/{id}/stream"
         };
     }
 }
