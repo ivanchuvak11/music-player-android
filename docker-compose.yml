@@ -32,6 +32,28 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build:
+      context: .
+      dockerfile: backend/MusicPlayer.Api/Dockerfile
+    container_name: music-player-api
+    restart: unless-stopped
+    ports:
+      - "5116:5116"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:5116
+      - ConnectionStrings__DefaultConnection=Host=postgres;Port=5432;Database=music_player;Username=music_player;Password=music_player_password
+      - ConnectionStrings__Redis=redis:6379
+      - Jwt__Key=local-development-secret-key-for-music-player-api-2026
+      - Jwt__Issuer=MusicPlayer.Api
+      - Jwt__Audience=MusicPlayer.Android
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:

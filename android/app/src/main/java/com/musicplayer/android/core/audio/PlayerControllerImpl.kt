@@ -307,7 +307,10 @@ class PlayerControllerImpl(
         consecutiveErrors = 0
         retryJob?.cancel()
         retryJob = null
-        mediaController?.seekToNextMediaItem()
+        val controller = mediaController
+        if (controller != null && controller.mediaItemCount > 0) {
+            controller.seekToNextMediaItem()
+        }
     }
 
     override fun playPrevious() {
@@ -315,7 +318,10 @@ class PlayerControllerImpl(
         consecutiveErrors = 0
         retryJob?.cancel()
         retryJob = null
-        mediaController?.seekToPreviousMediaItem()
+        val controller = mediaController
+        if (controller != null && controller.mediaItemCount > 0) {
+            controller.seekToPreviousMediaItem()
+        }
     }
 
     override fun seekTo(positionMs: Long) {
@@ -332,16 +338,24 @@ class PlayerControllerImpl(
     override fun setQueue(tracks: List<AudioTrack>, startIndex: Int, autoPlay: Boolean) {
         currentQueue = tracks
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
+        if (tracks.isEmpty()) {
+            pendingQueue = null
+            mediaController?.clearMediaItems()
+            updateState()
+            return
+        }
+
+        val safeStartIndex = startIndex.coerceIn(0, tracks.lastIndex)
         val mediaItems = tracks.map { it.toMediaItem() }
         val controller = mediaController
         val startPos = pendingSeekPositionMs ?: 0L
         if (controller == null) {
             // Fix #3: Store for replay when controller becomes available
-            pendingQueue = PendingQueue(tracks, startIndex, autoPlay, startPos)
+            pendingQueue = PendingQueue(tracks, safeStartIndex, autoPlay, startPos)
             return
         }
         pendingSeekPositionMs = null
-        controller.setMediaItems(mediaItems, startIndex, startPos)
+        controller.setMediaItems(mediaItems, safeStartIndex, startPos)
         controller.prepare()
         if (autoPlay) {
             controller.play()
@@ -359,13 +373,18 @@ class PlayerControllerImpl(
             val controller = mediaController
             val pos = pendingSeekPositionMs ?: 0L
             pendingSeekPositionMs = null
-            if (pos > 0L) {
-                controller?.seekTo(existingIndex, pos)
+            if (controller == null) {
+                // The queue is known locally, but the MediaController is still connecting.
+                pendingQueue = PendingQueue(currentQueue, existingIndex, autoPlay = true, startPositionMs = pos)
             } else {
-                controller?.seekToDefaultPosition(existingIndex)
+                if (pos > 0L) {
+                    controller.seekTo(existingIndex, pos)
+                } else {
+                    controller.seekToDefaultPosition(existingIndex)
+                }
+                play()
+                updateState()
             }
-            play()
-            updateState()
         } else {
             setQueue(listOf(track), startIndex = 0, autoPlay = true)
         }
