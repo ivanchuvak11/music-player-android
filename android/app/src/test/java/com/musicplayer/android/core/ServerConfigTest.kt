@@ -31,4 +31,18 @@ class ServerConfigTest {
         val resolved = ServerConfig.resolveAudiusStreamUrl("aud_456", "http://192.168.1.50:5116/")
         assertEquals("http://192.168.1.50:5116/api/audius/tracks/aud_456/stream", resolved)
     }
+
+    @Test
+    fun testRelativeProviderStreamUrlsUseBackendBaseUrl() {
+        val baseUrl = "http://152.70.19.219/"
+
+        assertEquals(
+            "http://152.70.19.219/api/soundcloud/tracks/123/stream",
+            ServerConfig.resolveSoundCloudStreamUrl("123", "/api/soundcloud/tracks/123/stream", baseUrl)
+        )
+        assertEquals(
+            "http://152.70.19.219/api/youtube/tracks/abc/stream",
+            ServerConfig.resolveYouTubeStreamUrl("abc", "/api/youtube/tracks/abc/stream", baseUrl)
+        )
+    }
 }
