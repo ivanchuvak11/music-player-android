@@ -12,10 +12,10 @@ object ServerConfig {
      * Resolves absolute stream URL for external track providers.
      */
     fun resolveJamendoStreamUrl(externalId: String, streamUrl: String?, baseUrl: String): String {
-        return if (streamUrl.isAbsoluteHttpUrl()) {
-            streamUrl!!
-        } else {
-            "${baseUrl.trimEnd('/')}/api/jamendo/tracks/$externalId/stream"
+        return when {
+            streamUrl.isAbsoluteHttpUrl() -> streamUrl!!
+            streamUrl?.startsWith("/") == true -> "${baseUrl.trimEnd('/')}$streamUrl"
+            else -> "${baseUrl.trimEnd('/')}/api/jamendo/tracks/$externalId/stream"
         }
     }
 
@@ -24,18 +24,18 @@ object ServerConfig {
     }
 
     fun resolveSoundCloudStreamUrl(externalId: String, streamUrl: String?, baseUrl: String): String {
-        return if (streamUrl.isAbsoluteHttpUrl()) {
-            streamUrl!!
-        } else {
-            "${baseUrl.trimEnd('/')}/api/soundcloud/tracks/$externalId/stream"
+        return when {
+            streamUrl.isAbsoluteHttpUrl() -> streamUrl!!
+            streamUrl?.startsWith("/") == true -> "${baseUrl.trimEnd('/')}$streamUrl"
+            else -> "${baseUrl.trimEnd('/')}/api/soundcloud/tracks/$externalId/stream"
         }
     }
 
     fun resolveYouTubeStreamUrl(externalId: String, streamUrl: String?, baseUrl: String): String {
-        return if (streamUrl.isAbsoluteHttpUrl()) {
-            streamUrl!!
-        } else {
-            "${baseUrl.trimEnd('/')}/api/youtube/tracks/$externalId/stream"
+        return when {
+            streamUrl.isAbsoluteHttpUrl() -> streamUrl!!
+            streamUrl?.startsWith("/") == true -> "${baseUrl.trimEnd('/')}$streamUrl"
+            else -> "${baseUrl.trimEnd('/')}/api/youtube/tracks/$externalId/stream"
         }
     }
 
