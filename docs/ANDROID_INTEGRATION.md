@@ -307,17 +307,29 @@ Audius search/trending
 Audius track metadata
 ```
 
-## 11. YouTube
+## 11. YouTube / YouTube Music
+ 
+Підтримка YouTube реалізована на бекенді через чистий аудіопотік (без реклами, з кешуванням у Redis на 4 години).
 
-YouTube не граємо як прямий stream через Media3.
+Backend endpoint-и:
 
-Функціонально:
+```text
+GET /api/youtube/search?q=rock&limit=20
+GET /api/youtube/tracks/{id}
+GET /api/youtube/tracks/{id}/stream
+```
 
-- якщо потім додамо YouTube metadata, можна показувати результати;
-- при натисканні відкривати YouTube app/browser;
-- або використовувати офіційний YouTube player;
-- не витягувати audio stream;
-- не кешувати YouTube audio.
+Для Media3 аудіопотік запускається так само, як Jamendo:
+
+```text
+MediaItem.fromUri("http://10.0.2.2:5116/api/youtube/tracks/{externalId}/stream")
+```
+
+Особливості:
+- Працює фонове відтворення у `MusicPlayerService`;
+- Працює еквалайзер `AudioEffectsManager` та Bass Boost;
+- Працює додавання в плейлисти та Favorites (`source: "youtube"`, `externalId: videoId`).
+- Потік не містить реклами.
 
 ## 12. Settings
 

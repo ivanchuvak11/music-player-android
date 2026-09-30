@@ -20,6 +20,7 @@ public class SoundCloudController : ControllerBase
 
     // GET /api/soundcloud/search?q=lofi&limit=10
     [HttpGet("search")]
+    [AllowAnonymous]
     public async Task<IActionResult> Search(
         [FromQuery] string q,
         [FromQuery] int limit = 20,
@@ -43,6 +44,7 @@ public class SoundCloudController : ControllerBase
 
     // GET /api/soundcloud/tracks/{id}
     [HttpGet("tracks/{id}")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetTrack(
         string id,
         CancellationToken cancellationToken)
@@ -70,6 +72,7 @@ public class SoundCloudController : ControllerBase
 
     // GET /api/soundcloud/tracks/{id}/stream
     [HttpGet("tracks/{id}/stream")]
+    [AllowAnonymous]
     [EnableRateLimiting("stream")]
     public async Task<IActionResult> Stream(
         string id,

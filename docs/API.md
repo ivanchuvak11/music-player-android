@@ -1,4 +1,4 @@
-﻿# Music Player REST API
+# Music Player REST API
 
 REST API бекенду для Android-застосунку **Music Player**.
 
@@ -785,7 +785,7 @@ DELETE /api/radio/favorites/{id}
 | Audius | `audius` | Реалізовано |
 | SoundCloud | `soundcloud` | Реалізовано |
 | Jamendo | `jamendo` | Реалізовано |
-| YouTube | `youtube` | Заплановано |
+| YouTube | `youtube` | Реалізовано |
 
 ## Audius
 
@@ -800,9 +800,75 @@ Audius використовується для:
 
 ## YouTube
 
-Інтеграція YouTube планується окремо.
+YouTube / YouTube Music використовується для:
 
-Для YouTube буде використовуватися офіційний механізм відтворення YouTube. YouTube не розглядається як пряме джерело аудіопотоку для Media3.
+- швидкого пошуку публічних музичних треків без реклами;
+- отримання детальних метаданих треку (назва, автор/канал, тривалість, обкладинка високої якості);
+- потокового відтворення чистого аудіопотоку (AAC/Opus) через `Media3/ExoPlayer` з підтримкою перемотування;
+- збереження треків у плейлистах та улюблених (`source: "youtube"`).
+
+Усі YouTube endpoint'и потребують JWT-авторизації:
+
+```http
+Authorization: Bearer <token>
+```
+
+### Пошук треків YouTube
+
+```http
+GET /api/youtube/search?q={query}&limit={limit}
+```
+
+#### Приклад
+
+```http
+GET /api/youtube/search?q=lofi+hip+hop&limit=10
+```
+
+#### Відповідь
+
+```json
+[
+  {
+    "source": "youtube",
+    "externalId": "jfKfPfyJRdk",
+    "title": "lofi hip hop radio 📚 - beats to relax/study to",
+    "artist": "Lofi Girl",
+    "artworkUrl": "https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg",
+    "durationMs": null,
+    "youTubeUrl": "https://www.youtube.com/watch?v=jfKfPfyJRdk",
+    "streamUrl": "/api/youtube/tracks/jfKfPfyJRdk/stream"
+  }
+]
+```
+
+---
+
+### Отримання інформації про YouTube трек
+
+```http
+GET /api/youtube/tracks/{id}
+```
+
+#### Приклад
+
+```http
+GET /api/youtube/tracks/jfKfPfyJRdk
+```
+
+---
+
+### Відтворення YouTube треку
+
+```http
+GET /api/youtube/tracks/{id}/stream
+```
+
+Повертає прямий аудіопотік найвищої якості. Підтримує Range Requests (`206 Partial Content`) для плавного перемотування в ExoPlayer. Посилання на потік кешується в Redis на 4 години.
+
+```http
+GET /api/youtube/tracks/jfKfPfyJRdk/stream
+```
 
 ## SoundCloud
 
@@ -863,10 +929,14 @@ Jamendo використовується для:
 - ASP.NET Core 10;
 - PostgreSQL;
 - Redis;
+- PostgreSQL;
+- Redis;
 - Entity Framework Core;
 - JWT Authentication;
 - Audius API;
-- Radio Browser API.
+- Radio Browser API;
+- Jamendo API;
+- YoutubeExplode (YouTube / YouTube Music).
 
 ## Кешування
 
@@ -881,11 +951,12 @@ Redis використовується для кешування read-only за�
 | SoundCloud track metadata | 30 хвилин |
 | Jamendo search | 10 хвилин |
 | Jamendo track metadata | 1 година |
+| YouTube search | 10 хвилин |
+| YouTube track metadata | 1 година |
+| YouTube stream URL | 4 години |
 | Radio Browser search | 10 хвилин |
 | Radio Browser popular | 10 хвилин |
 | Radio Browser station metadata | 24 години |
-
-Аудіопотоки не кешуються на бекенді.
 
 ---
 
@@ -893,6 +964,5 @@ Redis використовується для кешування read-only за�
 
 Наступні можливості ще не є частиною завершеного API:
 
-- інтеграція YouTube;
 - додаткове покращення потокового відтворення;
-- підтримка Android-клієнта через Retrofit та Media3/ExoPlayer.
+- розширення Android-клієнта через Jetpack Compose екрани для YouTube.

@@ -25,10 +25,10 @@ public class JamendoService
         int limit = 20,
         CancellationToken cancellationToken = default)
     {
-        query = query.Trim();
-
         if (string.IsNullOrWhiteSpace(query))
             return new List<JamendoTrackDto>();
+
+        query = query.Trim();
 
         limit = Math.Clamp(limit, 1, 50);
 
@@ -46,10 +46,10 @@ public class JamendoService
         string trackId,
         CancellationToken cancellationToken = default)
     {
-        trackId = trackId.Trim();
-
         if (string.IsNullOrWhiteSpace(trackId))
             return null;
+
+        trackId = trackId.Trim();
 
         var cacheKey = $"jamendo:track:{trackId.ToLowerInvariant()}";
 

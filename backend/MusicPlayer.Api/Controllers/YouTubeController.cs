@@ -7,18 +7,18 @@ using MusicPlayer.Api.Services;
 namespace MusicPlayer.Api.Controllers;
 
 [ApiController]
-[Route("api/jamendo")]
+[Route("api/youtube")]
 [Authorize]
-public class JamendoController : ControllerBase
+public class YouTubeController : ControllerBase
 {
-    private readonly JamendoService _jamendo;
+    private readonly YouTubeService _youtube;
 
-    public JamendoController(JamendoService jamendo)
+    public YouTubeController(YouTubeService youtube)
     {
-        _jamendo = jamendo;
+        _youtube = youtube;
     }
 
-    // GET /api/jamendo/search?q=rock&limit=10
+    // GET /api/youtube/search?q=rock&limit=10
     [HttpGet("search")]
     [AllowAnonymous]
     public async Task<IActionResult> Search(
@@ -34,12 +34,12 @@ public class JamendoController : ControllerBase
             });
         }
 
-        var tracks = await _jamendo.SearchAsync(q, limit, cancellationToken);
+        var tracks = await _youtube.SearchAsync(q, limit, cancellationToken);
 
         return Ok(tracks);
     }
 
-    // GET /api/jamendo/tracks/{id}
+    // GET /api/youtube/tracks/{id}
     [HttpGet("tracks/{id}")]
     [AllowAnonymous]
     public async Task<IActionResult> GetTrack(
@@ -54,20 +54,20 @@ public class JamendoController : ControllerBase
             });
         }
 
-        var track = await _jamendo.GetTrackAsync(id, cancellationToken);
+        var track = await _youtube.GetTrackAsync(id, cancellationToken);
 
         if (track is null)
         {
             return NotFound(new
             {
-                message = "Jamendo track not found."
+                message = "YouTube track not found."
             });
         }
 
         return Ok(track);
     }
 
-    // GET /api/jamendo/tracks/{id}/stream
+    // GET /api/youtube/tracks/{id}/stream
     [HttpGet("tracks/{id}/stream")]
     [AllowAnonymous]
     [EnableRateLimiting("stream")]
@@ -83,7 +83,7 @@ public class JamendoController : ControllerBase
             });
         }
 
-        var response = await _jamendo.GetStreamAsync(
+        var response = await _youtube.GetStreamAsync(
             id,
             Request.Headers.Range.ToString(),
             cancellationToken);
@@ -98,7 +98,7 @@ public class JamendoController : ControllerBase
                 statusCode,
                 new
                 {
-                    message = "Unable to get Jamendo stream."
+                    message = "Unable to get YouTube stream."
                 });
         }
 

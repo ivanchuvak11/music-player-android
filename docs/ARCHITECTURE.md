@@ -1,4 +1,4 @@
-﻿# Music Player Architecture
+# Music Player Architecture
 
 ## Stack
 
@@ -28,6 +28,9 @@ Redis використовується для кешування read-only за�
 - SoundCloud track metadata: 30 хвилин
 - Jamendo search: 10 хвилин
 - Jamendo track metadata: 1 година
+- YouTube search: 10 хвилин
+- YouTube track metadata: 1 година
+- YouTube stream URL: 4 години
 - Radio Browser search/popular: 10 хвилин
 - Radio Browser station metadata: 24 години
 

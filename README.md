@@ -1,4 +1,4 @@
-﻿# Music Player Android
+# Music Player Android
 
 Android music player supporting multiple music sources.
 
@@ -92,6 +92,14 @@ Jamendo endpoints:
 - `GET /api/jamendo/tracks/{id}/stream`
 
 Jamendo results include a direct `streamUrl` and can be played by Media3/ExoPlayer.
+
+YouTube endpoints:
+
+- `GET /api/youtube/search?q=rock&limit=20`
+- `GET /api/youtube/tracks/{id}`
+- `GET /api/youtube/tracks/{id}/stream`
+
+YouTube audio streams are clean, high-quality streams without ads, cached in Redis for 4 hours, and can be played by Media3/ExoPlayer.
 
 ## Team
 

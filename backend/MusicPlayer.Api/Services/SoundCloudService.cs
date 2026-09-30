@@ -27,10 +27,10 @@ public class SoundCloudService
         int limit = 20,
         CancellationToken cancellationToken = default)
     {
-        query = query.Trim();
-
         if (string.IsNullOrWhiteSpace(query))
             return new List<SoundCloudTrackDto>();
+
+        query = query.Trim();
 
         limit = Math.Clamp(limit, 1, 50);
 
@@ -48,10 +48,10 @@ public class SoundCloudService
         string trackId,
         CancellationToken cancellationToken = default)
     {
-        trackId = trackId.Trim();
-
         if (string.IsNullOrWhiteSpace(trackId))
             return null;
+
+        trackId = trackId.Trim();
 
         var cacheKey = $"soundcloud:track:{trackId.ToLowerInvariant()}";
 
@@ -67,10 +67,10 @@ public class SoundCloudService
         string? rangeHeader,
         CancellationToken cancellationToken = default)
     {
-        trackId = trackId.Trim();
-
         if (string.IsNullOrWhiteSpace(trackId))
-            throw new ArgumentException("Track ID is required.");
+            throw new ArgumentException("Track ID is required.", nameof(trackId));
+
+        trackId = trackId.Trim();
 
         using var metadataRequest = await CreateSoundCloudRequestAsync(
             $"tracks/{Uri.EscapeDataString(trackId)}",

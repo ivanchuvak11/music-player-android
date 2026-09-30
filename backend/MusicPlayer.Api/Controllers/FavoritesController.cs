@@ -68,8 +68,10 @@ public class FavoritesController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var source = request.Source.Trim().ToLowerInvariant();
-        var externalId = request.ExternalId.Trim();
+        var source = request.Source?.Trim().ToLowerInvariant() ?? string.Empty;
+        var externalId = request.ExternalId?.Trim() ?? string.Empty;
+        var title = request.Title?.Trim() ?? string.Empty;
+        var artist = request.Artist?.Trim() ?? string.Empty;
 
         if (source != "audius" &&
             source != "youtube" &&
@@ -83,7 +85,7 @@ public class FavoritesController : ControllerBase
         }
 
         if (string.IsNullOrWhiteSpace(externalId) ||
-            string.IsNullOrWhiteSpace(request.Title))
+            string.IsNullOrWhiteSpace(title))
         {
             return BadRequest(new
             {
@@ -109,8 +111,8 @@ public class FavoritesController : ControllerBase
             UserId = userId.Value,
             Source = source,
             ExternalId = externalId,
-            Title = request.Title.Trim(),
-            Artist = request.Artist.Trim(),
+            Title = title,
+            Artist = artist,
             ArtworkUrl = request.ArtworkUrl,
             DurationMs = request.DurationMs
         };
