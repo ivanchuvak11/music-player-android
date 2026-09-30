@@ -5,8 +5,8 @@ package com.musicplayer.android.core.network
  */
 object ServerConfig {
     const val DEFAULT_LOCAL_BASE_URL = "http://10.0.2.2:5116/"
-    const val PRODUCTION_BASE_URL = "https://musicplayer-api.example.com/" // Production placeholder
-    const val DEFAULT_BASE_URL = DEFAULT_LOCAL_BASE_URL
+    const val PRODUCTION_BASE_URL = "http://152.70.19.219/"
+    const val DEFAULT_BASE_URL = PRODUCTION_BASE_URL
 
     /**
      * Resolves absolute stream URL for external track providers.
