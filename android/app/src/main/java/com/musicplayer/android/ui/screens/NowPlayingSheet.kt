@@ -1,6 +1,10 @@
 package com.musicplayer.android.ui.screens
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,6 +25,7 @@ import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -28,16 +33,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
+import kotlin.math.roundToInt
 import coil.compose.SubcomposeAsyncImage
 import com.musicplayer.android.R
 import com.musicplayer.android.core.audio.AudioTrack
@@ -88,18 +97,92 @@ fun NowPlayingSheet(
         pageCount = { currentQueue.size }
     )
 
-    // Sync pager when track changes externally (Next/Prev buttons, queue auto-advance)
-    LaunchedEffect(activeTrackIndex) {
-        if (pagerState.currentPage != activeTrackIndex && activeTrackIndex in currentQueue.indices) {
-            pagerState.animateScrollToPage(activeTrackIndex)
+    val density = LocalDensity.current
+    val isShuffle = playbackState.shuffleModeEnabled
+    // Smooth animated exit and entry for left/right peek covers when shuffle button is toggled
+    val shuffleExitProgress by animateFloatAsState(
+        targetValue = if (isShuffle) 1f else 0f,
+        animationSpec = tween(durationMillis = 380, easing = FastOutSlowInEasing),
+        label = "ShuffleExitProgress"
+    )
+    var lastTrackId by remember { mutableStateOf(activeTrack.id) }
+    var isShufflingAnimation by remember { mutableStateOf(false) }
+    var shuffleRollCovers by remember { mutableStateOf<List<AudioTrack>>(emptyList()) }
+    val wheelProgress = remember { Animatable(0f) }
+    val extraSideOffset = remember { Animatable(0f) }
+    var showEqualizerDialog by remember { mutableStateOf(false) }
+    val audioEffectsState by viewModel.audioEffectsState.collectAsState()
+
+    // Smooth 3-phase circular arc roll when track changes under shuffle:
+    // Phase 1: Side covers quickly slide in from behind screen edges
+    // Phase 2: Carousel rolls along circular arc to target track
+    // Phase 3: Remaining side covers slide out past screen edges, leaving active track centered
+    LaunchedEffect(activeTrack.id) {
+        if (lastTrackId != activeTrack.id) {
+            val prevId = lastTrackId
+            lastTrackId = activeTrack.id
+            if (isShuffle && currentQueue.size > 1 && prevId.isNotBlank()) {
+                val prevTrack = currentQueue.firstOrNull { it.id == prevId } ?: activeTrack
+                val pool = currentQueue.filter { it.id != activeTrack.id && it.id != prevTrack.id }
+                val intermediate = if (pool.size >= 2) {
+                    pool.shuffled().take(2)
+                } else if (pool.isNotEmpty()) {
+                    listOf(pool.random(), pool.random())
+                } else {
+                    listOf(activeTrack, prevTrack)
+                }
+                val rollList = listOf(prevTrack) + intermediate + listOf(activeTrack)
+                shuffleRollCovers = rollList
+
+                val maxShift = with(density) { screenWidth.toPx() * 0.85f }
+
+                // 1. Initial state: prevTrack centered (rel=0), side covers placed completely off-screen
+                wheelProgress.snapTo(0f)
+                extraSideOffset.snapTo(maxShift)
+                isShufflingAnimation = true
+
+                // 2. Entrance: side covers quickly emerge/slide in from behind screen edges
+                extraSideOffset.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
+                )
+
+                // 3. Roll: smoothly spin across the circular arc (center below screen) to target track
+                wheelProgress.animateTo(
+                    targetValue = (rollList.size - 1).toFloat(),
+                    animationSpec = tween(
+                        durationMillis = 620,
+                        easing = CubicBezierEasing(0.14f, 0.92f, 0.22f, 1.0f)
+                    )
+                )
+
+                // 4. Exit: remaining side covers smoothly slide out past screen edges, leaving active track centered
+                extraSideOffset.animateTo(
+                    targetValue = maxShift,
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+                )
+
+                // 5. Complete and sync Pager
+                if (activeTrackIndex in currentQueue.indices) {
+                    pagerState.scrollToPage(activeTrackIndex)
+                }
+                isShufflingAnimation = false
+                extraSideOffset.snapTo(0f)
+            } else {
+                if (activeTrackIndex in currentQueue.indices && pagerState.currentPage != activeTrackIndex) {
+                    pagerState.animateScrollToPage(activeTrackIndex)
+                }
+            }
         }
     }
 
-    // Sync playback when user swipes to a different track in carousel
+    // Sync playback when user swipes to a different track in carousel (only when shuffle is off)
     LaunchedEffect(pagerState.currentPage) {
-        val selectedTrack = currentQueue.getOrNull(pagerState.currentPage)
-        if (selectedTrack != null && selectedTrack.id != activeTrack.id) {
-            viewModel.playTrack(selectedTrack)
+        if (!isShuffle) {
+            val selectedTrack = currentQueue.getOrNull(pagerState.currentPage)
+            if (selectedTrack != null && selectedTrack.id != activeTrack.id) {
+                viewModel.playTrack(selectedTrack)
+            }
         }
     }
 
@@ -215,44 +298,123 @@ fun NowPlayingSheet(
                         .background(Color.White.copy(alpha = 0.25f))
                 )
 
-                // Horizontal Pager with peeking adjacent album covers dynamically sized to screen resolution
-                HorizontalPager(
-                    state = pagerState,
-                    pageSize = PageSize.Fixed(cardSize),
-                    contentPadding = PaddingValues(horizontal = horizontalPadding),
-                    pageSpacing = 16.dp,
+                // Album Art Carousel (Curved wheel arc roll during shuffle, and smooth side-covers slide out/in)
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(cardSize + 16.dp)
-                ) { page ->
-                    val track = currentQueue[page]
-                    val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue
-                    val scale = lerp(0.85f, 1f, (1f - pageOffset).coerceIn(0f, 1f))
-                    val itemAlpha = lerp(0.50f, 1f, (1f - pageOffset).coerceIn(0f, 1f))
+                        .height(cardSize + 28.dp)
+                        .clipToBounds(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isShuffle && isShufflingAnimation && shuffleRollCovers.isNotEmpty()) {
+                        val maxShift = with(density) { screenWidth.toPx() * 0.85f }
+                        val shiftRatio = (extraSideOffset.value / maxShift.coerceAtLeast(1f)).coerceIn(0f, 1f)
 
-                    Box(
-                        modifier = Modifier
-                            .size(cardSize)
-                            .graphicsLayer {
-                                scaleX = scale
-                                scaleY = scale
-                                alpha = itemAlpha
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        TrackArtwork(
-                            artworkUrl = track.artworkUrl,
-                            isLiveStream = track.isLiveStream,
-                            size = cardSize,
-                            shape = RoundedCornerShape(26.dp),
+                        // Smooth Circular Arc Wheel Roll (center of circle is below the screen)
+                        shuffleRollCovers.forEachIndexed { index, trackItem ->
+                            val rel = index - wheelProgress.value
+                            // Render covers within angular visible window
+                            if (rel.absoluteValue < 2.5f) {
+                                val cardStepPx = with(density) { (cardSize * 0.92f).toPx() }
+                                val transX = rel * cardStepPx
+                                // Center of circle is below screen -> apex is at rel = 0, downward dip as |rel| increases
+                                val transY = with(density) { (rel * rel * 24.dp.toPx()) }
+                                val rotationDeg = rel * 14f
+                                val scale = (1.0f - rel.absoluteValue * 0.10f).coerceIn(0.70f, 1.0f)
+
+                                // Smooth entrance from edges before roll, and exit off-screen after roll
+                                val sideDir = (rel / 0.15f).coerceIn(-1f, 1f)
+                                val sideShiftX = sideDir * extraSideOffset.value
+
+                                val baseAlpha = (1.0f - (rel.absoluteValue - 0.70f).coerceAtLeast(0f) * 1.6f).coerceIn(0f, 1.0f)
+                                val alpha = if (rel.absoluteValue < 0.15f) 1.0f else (baseAlpha * (1f - shiftRatio)).coerceIn(0f, 1.0f)
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(cardSize)
+                                        .graphicsLayer {
+                                            translationX = transX + sideShiftX
+                                            translationY = transY
+                                            rotationZ = rotationDeg
+                                            scaleX = scale
+                                            scaleY = scale
+                                            this.alpha = alpha
+                                        }
+                                        .clip(RoundedCornerShape(26.dp))
+                                        .border(
+                                            width = 1.dp,
+                                            color = if (index == shuffleRollCovers.lastIndex) DarkRefTheme.AccentMint.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.14f),
+                                            shape = RoundedCornerShape(26.dp)
+                                        ),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    TrackArtwork(
+                                        artworkUrl = trackItem.artworkUrl,
+                                        isLiveStream = trackItem.isLiveStream,
+                                        size = cardSize,
+                                        shape = RoundedCornerShape(26.dp)
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        HorizontalPager(
+                            state = pagerState,
+                            pageSize = PageSize.Fixed(cardSize),
+                            contentPadding = PaddingValues(horizontal = horizontalPadding),
+                            pageSpacing = 16.dp,
+                            userScrollEnabled = !isShuffle && shuffleExitProgress == 0f,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(26.dp))
-                                .border(
-                                    width = 1.dp,
-                                    color = Color.White.copy(alpha = 0.14f),
-                                    shape = RoundedCornerShape(26.dp)
+                                .fillMaxWidth()
+                                .height(cardSize + 28.dp)
+                        ) { page ->
+                            val track = currentQueue[page]
+                            val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue
+                            val scale = lerp(0.85f, 1f, (1f - pageOffset).coerceIn(0f, 1f))
+
+                            val isCurrentPage = page == pagerState.currentPage
+                            val isLeftPage = page < pagerState.currentPage
+                            val isRightPage = page > pagerState.currentPage
+                            val screenWidthPx = with(density) { screenWidth.toPx() }
+
+                            // Smooth slide out to left / right edges when shuffle is turned on; slide back in when turned off
+                            val sideSlideX = if (isLeftPage) {
+                                -shuffleExitProgress * (screenWidthPx * 0.75f)
+                            } else if (isRightPage) {
+                                shuffleExitProgress * (screenWidthPx * 0.75f)
+                            } else {
+                                0f
+                            }
+
+                            val baseAlpha = lerp(0.50f, 1f, (1f - pageOffset).coerceIn(0f, 1f))
+                            val itemAlpha = if (isCurrentPage) 1f else (baseAlpha * (1f - shuffleExitProgress)).coerceIn(0f, 1f)
+
+                            Box(
+                                modifier = Modifier
+                                    .size(cardSize)
+                                    .graphicsLayer {
+                                        scaleX = scale
+                                        scaleY = scale
+                                        translationX = sideSlideX
+                                        alpha = itemAlpha
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                TrackArtwork(
+                                    artworkUrl = track.artworkUrl,
+                                    isLiveStream = track.isLiveStream,
+                                    size = cardSize,
+                                    shape = RoundedCornerShape(26.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(26.dp))
+                                        .border(
+                                            width = 1.dp,
+                                            color = Color.White.copy(alpha = 0.14f),
+                                            shape = RoundedCornerShape(26.dp)
+                                        )
                                 )
-                        )
+                            }
+                        }
                     }
                 }
 
@@ -424,7 +586,6 @@ fun NowPlayingSheet(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val isShuffle = playbackState.shuffleModeEnabled
                 IconButton(
                     onClick = { viewModel.toggleShuffle() },
                     modifier = Modifier
@@ -461,6 +622,22 @@ fun NowPlayingSheet(
                     )
                 }
 
+                // Equalizer quick tool button
+                IconButton(
+                    onClick = { showEqualizerDialog = true },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (audioEffectsState.isEnabled) DarkRefTheme.AccentMint.copy(alpha = 0.16f) else Color.Transparent)
+                        .padding(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Tune,
+                        contentDescription = "Equalizer",
+                        tint = if (audioEffectsState.isEnabled) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
                 IconButton(
                     onClick = { onAddToPlaylist(activeTrack) }
                 ) {
@@ -476,6 +653,14 @@ fun NowPlayingSheet(
                     Spacer(modifier = Modifier.height(24.dp))
                 }
             }
+        }
+
+        if (showEqualizerDialog) {
+            EqualizerDialog(
+                viewModel = viewModel,
+                audioEffectsState = audioEffectsState,
+                onDismiss = { showEqualizerDialog = false }
+            )
         }
     }
 }

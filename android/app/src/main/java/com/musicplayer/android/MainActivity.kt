@@ -20,11 +20,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Checklist
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Equalizer
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.*
@@ -37,6 +41,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -49,6 +56,30 @@ import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 import com.musicplayer.android.ui.components.*
 import com.musicplayer.android.ui.screens.*
 import com.musicplayer.android.ui.theme.DarkRefTheme
+
+enum class LibrarySubTab {
+    ON_DEVICE,
+    FAVORITES,
+    PLAYLISTS
+}
+
+enum class TrackSortOrder(val labelResId: Int) {
+    DEFAULT(R.string.sort_default),
+    TITLE_ASC(R.string.sort_title_asc),
+    TITLE_DESC(R.string.sort_title_desc),
+    ARTIST_ASC(R.string.sort_artist_asc),
+    DURATION_DESC(R.string.sort_duration_desc),
+    DURATION_ASC(R.string.sort_duration_asc)
+}
+
+fun List<AudioTrack>.sortedByOrder(order: TrackSortOrder): List<AudioTrack> = when (order) {
+    TrackSortOrder.DEFAULT -> this
+    TrackSortOrder.TITLE_ASC -> this.sortedBy { it.title.lowercase() }
+    TrackSortOrder.TITLE_DESC -> this.sortedByDescending { it.title.lowercase() }
+    TrackSortOrder.ARTIST_ASC -> this.sortedWith(compareBy({ it.artist.lowercase() }, { it.title.lowercase() }))
+    TrackSortOrder.DURATION_DESC -> this.sortedByDescending { it.durationMs }
+    TrackSortOrder.DURATION_ASC -> this.sortedBy { it.durationMs }
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -123,9 +154,19 @@ fun PlayerCoreScreen() {
     var isMultiSelectMode by remember { mutableStateOf(false) }
     var selectedTracks by remember { mutableStateOf(setOf<AudioTrack>()) }
     var currentRadioIndex by remember { mutableStateOf(0) }
-    var isFavoritesExpanded by remember { mutableStateOf(true) }
     var expandedPlaylistId by remember { mutableStateOf<Long?>(null) }
     var newPlaylistNameInput by remember { mutableStateOf("") }
+    var librarySubTab by remember { mutableStateOf(LibrarySubTab.ON_DEVICE) }
+    var trackSortOrder by remember { mutableStateOf(TrackSortOrder.DEFAULT) }
+    var showSortMenu by remember { mutableStateOf(false) }
+    var showFavSortMenu by remember { mutableStateOf(false) }
+
+    val sortedLocalTracks = remember(localTracks, trackSortOrder) {
+        localTracks.sortedByOrder(trackSortOrder)
+    }
+    val sortedFavorites = remember(localFavorites, trackSortOrder) {
+        localFavorites.map { it.toAudioTrack() }.sortedByOrder(trackSortOrder)
+    }
 
     // Sync radio index
     LaunchedEffect(currentPlayingTrack) {
@@ -461,283 +502,531 @@ fun PlayerCoreScreen() {
                     }
 
                     NavigationTab.LIBRARY -> {
-                        // TAB 3: LIBRARY (On-device tracks, favorites, playlists)
+                        // TAB 3: LIBRARY (3 Sub-categories: На пристрої, Улюблені, Плейлісти)
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             contentPadding = listContentPadding
                         ) {
-                            // Section 1: Playlists
-                            item {
-                                Text(
-                                    text = "${stringResource(R.string.header_playlists)} (${localPlaylists.size})",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 16.sp,
-                                    color = DarkRefTheme.TextPrimary
-                                )
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    OutlinedTextField(
-                                        value = newPlaylistNameInput,
-                                        onValueChange = { newPlaylistNameInput = it },
-                                        placeholder = { Text(stringResource(R.string.new_playlist_hint), fontSize = 12.sp, color = DarkRefTheme.TextSecondary) },
-                                        modifier = Modifier.weight(1f),
-                                        singleLine = true,
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = DarkRefTheme.TextPrimary,
-                                            unfocusedTextColor = DarkRefTheme.TextPrimary
-                                        )
-                                    )
-                                    Button(
-                                        onClick = {
-                                            if (newPlaylistNameInput.isNotBlank()) {
-                                                val name = newPlaylistNameInput.trim()
-                                                viewModel.createPlaylist(name)
-                                                newPlaylistNameInput = ""
-                                                Toast.makeText(context, "Плейліст «$name» створено!", Toast.LENGTH_SHORT).show()
-                                            }
-                                        },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color.White)
-                                    ) {
-                                        Text(stringResource(R.string.btn_create), fontSize = 11.sp, color = DarkRefTheme.BackgroundDark, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-
-                            items(
-                                items = localPlaylists,
-                                key = { "pl_${it.id}" },
-                                contentType = { "playlist" }
-                            ) { pl ->
-                                LocalPlaylistCard(
-                                    playlist = pl,
-                                    viewModel = viewModel,
-                                    isExpanded = expandedPlaylistId == pl.id,
-                                    onToggleExpand = {
-                                        expandedPlaylistId = if (expandedPlaylistId == pl.id) null else pl.id
-                                    },
-                                    onDelete = {
-                                        viewModel.deleteLocalPlaylist(pl.id)
-                                        Toast.makeText(context, "Плейліст видалено", Toast.LENGTH_SHORT).show()
-                                    },
-                                    onPlayAll = { viewModel.playLocalPlaylist(pl.id) }
-                                )
-                            }
-
-                            // Section 2: Favorites
-                            item(key = "library_favorites_header") {
-                                Spacer(modifier = Modifier.height(10.dp))
+                            // Sub-category selector chips (default: "На пристрої" per user request)
+                            item(key = "library_subtabs_selector") {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { isFavoritesExpanded = !isFavoritesExpanded },
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text(
-                                        text = "${stringResource(R.string.header_favorites)} (${localFavorites.size})",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = DarkRefTheme.TextPrimary
+                                    val subTabs = listOf(
+                                        Triple(LibrarySubTab.ON_DEVICE, "На пристрої (${localTracks.size})", Icons.Rounded.PhoneAndroid),
+                                        Triple(LibrarySubTab.FAVORITES, "Улюблені (${localFavorites.size})", Icons.Rounded.Favorite),
+                                        Triple(LibrarySubTab.PLAYLISTS, "Плейлісти (${localPlaylists.size})", Icons.AutoMirrored.Rounded.PlaylistPlay)
                                     )
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (localFavorites.isNotEmpty()) {
-                                             TextButton(onClick = {
-                                                val favTracks = localFavorites.map { it.toAudioTrack() }
-                                                viewModel.playQueue(favTracks, 0)
-                                            }) {
-                                                Text(stringResource(R.string.btn_play_all), fontSize = 11.sp, color = Color.White)
-                                            }
-                                        }
-                                        Text(if (isFavoritesExpanded) "▲" else "▼", fontSize = 12.sp, color = DarkRefTheme.TextSecondary)
-                                    }
-                                }
-                            }
-
-                            if (isFavoritesExpanded && localFavorites.isNotEmpty()) {
-                                items(
-                                    items = localFavorites,
-                                    key = { "fav_${it.id}" },
-                                    contentType = { "track" }
-                                ) { favEntity ->
-                                    val track = favEntity.toAudioTrack()
-                                    TrackItemRow(
-                                        track = track,
-                                        onPlay = { viewModel.playTrack(track) },
-                                        isFavorite = true,
-                                        isPlayingThisTrack = currentPlayingTrack?.id == track.id,
-                                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
-                                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
-                                        onTrackCardClick = {
-                                            if (currentPlayingTrack?.id != track.id) {
-                                                viewModel.playTrack(track)
-                                            }
-                                            showNowPlayingSheet = true
-                                        }
-                                    )
-                                }
-                            }
-
-                            // Section 3: Local Tracks (All songs below playlists and favorites)
-                            item {
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "${stringResource(R.string.header_on_device)} (${localTracks.size})",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = DarkRefTheme.TextPrimary
-                                    )
-                                    Surface(
-                                        onClick = {
-                                            isMultiSelectMode = !isMultiSelectMode
-                                            if (!isMultiSelectMode) selectedTracks = emptySet()
-                                        },
-                                        shape = RoundedCornerShape(20.dp),
-                                        color = if (isMultiSelectMode) DarkRefTheme.AccentMint.copy(alpha = 0.18f) else DarkRefTheme.SurfaceCardElevated,
-                                        border = BorderStroke(1.dp, if (isMultiSelectMode) DarkRefTheme.AccentMint.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.10f))
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    subTabs.forEach { (subTab, title, icon) ->
+                                        val isSelected = librarySubTab == subTab
+                                        Surface(
+                                            onClick = { librarySubTab = subTab },
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = if (isSelected) DarkRefTheme.AccentMint.copy(alpha = 0.20f) else DarkRefTheme.SurfaceCardElevated,
+                                            border = BorderStroke(
+                                                1.dp,
+                                                if (isSelected) DarkRefTheme.AccentMint.copy(alpha = 0.70f) else Color.White.copy(alpha = 0.08f)
+                                            ),
+                                            modifier = Modifier.weight(1f)
                                         ) {
-                                            Icon(
-                                                imageVector = if (isMultiSelectMode) Icons.Rounded.Close else Icons.Rounded.Checklist,
-                                                contentDescription = null,
-                                                tint = if (isMultiSelectMode) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
-                                                modifier = Modifier.size(15.dp)
-                                            )
-                                            Text(
-                                                text = if (isMultiSelectMode) stringResource(R.string.btn_close_selection) else stringResource(R.string.btn_select_multiple),
-                                                fontSize = 12.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = if (isMultiSelectMode) DarkRefTheme.AccentMint else DarkRefTheme.TextPrimary
-                                            )
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+                                                horizontalArrangement = Arrangement.Center,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Icon(
+                                                    imageVector = icon,
+                                                    contentDescription = null,
+                                                    tint = if (isSelected) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
+                                                    modifier = Modifier.size(14.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = title,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                    color = if (isSelected) DarkRefTheme.AccentMint else DarkRefTheme.TextPrimary,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
                                         }
                                     }
                                 }
                             }
 
-                            if (isMultiSelectMode) {
-                                item {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = DarkRefTheme.SurfaceCardElevated,
-                                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f))
-                                    ) {
+                            when (librarySubTab) {
+                                LibrarySubTab.ON_DEVICE -> {
+                                    // Section: Local tracks on device
+                                    item(key = "library_on_device_header") {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "${stringResource(R.string.header_on_device)} (${localTracks.size})",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = DarkRefTheme.TextPrimary
+                                        )
+
+                                        Spacer(modifier = Modifier.height(8.dp))
+
                                         Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            // Counter badge
-                                            Surface(
-                                                shape = RoundedCornerShape(12.dp),
-                                                color = DarkRefTheme.AccentMint.copy(alpha = 0.15f)
-                                            ) {
-                                                Text(
-                                                    text = "Обрано: ${selectedTracks.size}",
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = DarkRefTheme.AccentMint,
-                                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                                )
-                                            }
-
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                TextButton(
-                                                    onClick = {
-                                                        selectedTracks = if (selectedTracks.size == localTracks.size) emptySet() else localTracks.toSet()
-                                                    },
-                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text(
-                                                        text = if (selectedTracks.size == localTracks.size) stringResource(R.string.btn_deselect_all) else stringResource(R.string.btn_select_all),
-                                                        fontSize = 12.sp,
-                                                        color = DarkRefTheme.TextPrimary
-                                                    )
-                                                }
-
-                                                Button(
-                                                    enabled = selectedTracks.isNotEmpty(),
-                                                    onClick = { tracksToAddToPlaylist = selectedTracks.toList() },
-                                                    shape = RoundedCornerShape(12.dp),
-                                                    colors = ButtonDefaults.buttonColors(
-                                                        containerColor = DarkRefTheme.AccentMint,
-                                                        disabledContainerColor = DarkRefTheme.SurfaceCard
-                                                    ),
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                            // Sort Button with DropdownMenu
+                                            Box {
+                                                Surface(
+                                                    onClick = { showSortMenu = true },
+                                                    shape = RoundedCornerShape(20.dp),
+                                                    color = if (trackSortOrder != TrackSortOrder.DEFAULT) DarkRefTheme.AccentMint.copy(alpha = 0.18f) else DarkRefTheme.SurfaceCardElevated,
+                                                    border = BorderStroke(1.dp, if (trackSortOrder != TrackSortOrder.DEFAULT) DarkRefTheme.AccentMint.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.10f))
                                                 ) {
                                                     Row(
+                                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                                                         verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                     ) {
                                                         Icon(
-                                                            imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
-                                                            contentDescription = null,
-                                                            tint = if (selectedTracks.isNotEmpty()) DarkRefTheme.BackgroundDark else DarkRefTheme.TextSecondary,
+                                                            imageVector = Icons.AutoMirrored.Rounded.Sort,
+                                                            contentDescription = stringResource(R.string.sort_button),
+                                                            tint = if (trackSortOrder != TrackSortOrder.DEFAULT) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
                                                             modifier = Modifier.size(16.dp)
                                                         )
                                                         Text(
-                                                            text = "${stringResource(R.string.btn_add_to_playlist)} (${selectedTracks.size})",
+                                                            text = stringResource(trackSortOrder.labelResId),
                                                             fontSize = 12.sp,
-                                                            color = if (selectedTracks.isNotEmpty()) DarkRefTheme.BackgroundDark else DarkRefTheme.TextSecondary,
-                                                            fontWeight = FontWeight.Bold
+                                                            fontWeight = FontWeight.Medium,
+                                                            color = if (trackSortOrder != TrackSortOrder.DEFAULT) DarkRefTheme.AccentMint else DarkRefTheme.TextPrimary
                                                         )
+                                                    }
+                                                }
+
+                                                DropdownMenu(
+                                                    expanded = showSortMenu,
+                                                    onDismissRequest = { showSortMenu = false },
+                                                    modifier = Modifier.background(DarkRefTheme.SurfaceCardElevated)
+                                                ) {
+                                                    TrackSortOrder.values().forEach { order ->
+                                                        val isCurrent = trackSortOrder == order
+                                                        DropdownMenuItem(
+                                                            text = {
+                                                                Row(
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                                ) {
+                                                                    if (isCurrent) {
+                                                                        Icon(
+                                                                            imageVector = Icons.Rounded.Check,
+                                                                            contentDescription = null,
+                                                                            tint = DarkRefTheme.AccentMint,
+                                                                            modifier = Modifier.size(16.dp)
+                                                                        )
+                                                                    } else {
+                                                                        Spacer(modifier = Modifier.size(16.dp))
+                                                                    }
+                                                                    Text(
+                                                                        text = stringResource(order.labelResId),
+                                                                        color = if (isCurrent) DarkRefTheme.AccentMint else DarkRefTheme.TextPrimary,
+                                                                        fontSize = 13.sp,
+                                                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                                                                    )
+                                                                }
+                                                            },
+                                                            onClick = {
+                                                                trackSortOrder = order
+                                                                showSortMenu = false
+                                                            }
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            // Multi-select toggle button
+                                            Surface(
+                                                onClick = {
+                                                    isMultiSelectMode = !isMultiSelectMode
+                                                    if (!isMultiSelectMode) selectedTracks = emptySet()
+                                                },
+                                                shape = RoundedCornerShape(20.dp),
+                                                color = if (isMultiSelectMode) DarkRefTheme.AccentMint.copy(alpha = 0.18f) else DarkRefTheme.SurfaceCardElevated,
+                                                border = BorderStroke(1.dp, if (isMultiSelectMode) DarkRefTheme.AccentMint.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.10f))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = if (isMultiSelectMode) Icons.Rounded.Close else Icons.Rounded.Checklist,
+                                                        contentDescription = null,
+                                                        tint = if (isMultiSelectMode) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Text(
+                                                        text = if (isMultiSelectMode) stringResource(R.string.btn_close_selection) else stringResource(R.string.btn_select_multiple),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = if (isMultiSelectMode) DarkRefTheme.AccentMint else DarkRefTheme.TextPrimary
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (isMultiSelectMode) {
+                                        item(key = "library_multiselect_bar") {
+                                            Surface(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = DarkRefTheme.SurfaceCardElevated,
+                                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.10f))
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        color = DarkRefTheme.AccentMint.copy(alpha = 0.15f)
+                                                    ) {
+                                                        Text(
+                                                            text = "Обрано: ${selectedTracks.size}",
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = DarkRefTheme.AccentMint,
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                                        )
+                                                    }
+
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
+                                                        TextButton(
+                                                            onClick = {
+                                                                selectedTracks = if (selectedTracks.size == localTracks.size) emptySet() else localTracks.toSet()
+                                                            },
+                                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = if (selectedTracks.size == localTracks.size) stringResource(R.string.btn_deselect_all) else stringResource(R.string.btn_select_all),
+                                                                fontSize = 12.sp,
+                                                                color = DarkRefTheme.TextPrimary
+                                                            )
+                                                        }
+
+                                                        Button(
+                                                            enabled = selectedTracks.isNotEmpty(),
+                                                            onClick = { tracksToAddToPlaylist = selectedTracks.toList() },
+                                                            shape = RoundedCornerShape(12.dp),
+                                                            colors = ButtonDefaults.buttonColors(
+                                                                containerColor = DarkRefTheme.AccentMint,
+                                                                disabledContainerColor = DarkRefTheme.SurfaceCard
+                                                            ),
+                                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                        ) {
+                                                            Row(
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                                                    contentDescription = null,
+                                                                    tint = if (selectedTracks.isNotEmpty()) DarkRefTheme.BackgroundDark else DarkRefTheme.TextSecondary,
+                                                                    modifier = Modifier.size(16.dp)
+                                                                )
+                                                                Text(
+                                                                    text = "${stringResource(R.string.btn_add_to_playlist)} (${selectedTracks.size})",
+                                                                    fontSize = 12.sp,
+                                                                    color = if (selectedTracks.isNotEmpty()) DarkRefTheme.BackgroundDark else DarkRefTheme.TextSecondary,
+                                                                    fontWeight = FontWeight.Bold
+                                                                )
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
                                     }
-                                }
-                            }
 
-                            items(
-                                items = localTracks,
-                                key = { "loc_${it.id}" },
-                                contentType = { "track" }
-                            ) { track ->
-                                val isSelected = selectedTracks.contains(track)
-                                TrackItemRow(
-                                    track = track,
-                                    onPlay = {
-                                        if (isMultiSelectMode) {
-                                            selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
-                                        } else {
-                                            viewModel.playLocalTrack(track)
+                                    if (localTracks.isEmpty()) {
+                                        item(key = "empty_local_tracks") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 40.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "На пристрої не знайдено аудіофайлів.\nПеревірте дозволи на доступ до сховища.",
+                                                    color = DarkRefTheme.TextSecondary,
+                                                    fontSize = 13.sp,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
                                         }
-                                    },
-                                    isSelectionMode = isMultiSelectMode,
-                                    isSelected = isSelected,
-                                    isFavorite = localFavorites.any { it.id == track.id },
-                                    isPlayingThisTrack = currentPlayingTrack?.id == track.id,
-                                    onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
-                                    onToggleSelect = {
-                                        selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
-                                    },
-                                    onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
-                                    onTrackCardClick = {
-                                        if (currentPlayingTrack?.id != track.id) {
-                                            viewModel.playLocalTrack(track)
+                                    } else {
+                                        items(
+                                            items = sortedLocalTracks,
+                                            key = { "loc_${it.id}" },
+                                            contentType = { "track" }
+                                        ) { track ->
+                                            val isSelected = selectedTracks.contains(track)
+                                            TrackItemRow(
+                                                track = track,
+                                                onPlay = {
+                                                    if (isMultiSelectMode) {
+                                                        selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
+                                                    } else {
+                                                        viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                    }
+                                                },
+                                                isSelectionMode = isMultiSelectMode,
+                                                isSelected = isSelected,
+                                                isFavorite = localFavorites.any { it.id == track.id },
+                                                isPlayingThisTrack = currentPlayingTrack?.id == track.id,
+                                                onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                                onToggleSelect = {
+                                                    selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
+                                                },
+                                                onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                                onTrackCardClick = {
+                                                    if (currentPlayingTrack?.id != track.id) {
+                                                        viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                    }
+                                                    showNowPlayingSheet = true
+                                                }
+                                            )
                                         }
-                                        showNowPlayingSheet = true
                                     }
-                                )
+                                }
+
+                                LibrarySubTab.FAVORITES -> {
+                                    // Section: Favorites
+                                    item(key = "library_favorites_header") {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "${stringResource(R.string.header_favorites)} (${localFavorites.size})",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = DarkRefTheme.TextPrimary
+                                        )
+
+                                        if (localFavorites.isNotEmpty()) {
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                // Sort Button with DropdownMenu for Favorites
+                                                Box {
+                                                    Surface(
+                                                        onClick = { showFavSortMenu = true },
+                                                        shape = RoundedCornerShape(20.dp),
+                                                        color = if (trackSortOrder != TrackSortOrder.DEFAULT) DarkRefTheme.AccentMint.copy(alpha = 0.18f) else DarkRefTheme.SurfaceCardElevated,
+                                                        border = BorderStroke(1.dp, if (trackSortOrder != TrackSortOrder.DEFAULT) DarkRefTheme.AccentMint.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.10f))
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.AutoMirrored.Rounded.Sort,
+                                                                contentDescription = stringResource(R.string.sort_button),
+                                                                tint = if (trackSortOrder != TrackSortOrder.DEFAULT) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                            Text(
+                                                                text = stringResource(trackSortOrder.labelResId),
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Medium,
+                                                                color = if (trackSortOrder != TrackSortOrder.DEFAULT) DarkRefTheme.AccentMint else DarkRefTheme.TextPrimary
+                                                            )
+                                                        }
+                                                    }
+
+                                                    DropdownMenu(
+                                                        expanded = showFavSortMenu,
+                                                        onDismissRequest = { showFavSortMenu = false },
+                                                        modifier = Modifier.background(DarkRefTheme.SurfaceCardElevated)
+                                                    ) {
+                                                        TrackSortOrder.values().forEach { order ->
+                                                            val isCurrent = trackSortOrder == order
+                                                            DropdownMenuItem(
+                                                                text = {
+                                                                    Row(
+                                                                        verticalAlignment = Alignment.CenterVertically,
+                                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                                    ) {
+                                                                        if (isCurrent) {
+                                                                            Icon(
+                                                                                imageVector = Icons.Rounded.Check,
+                                                                                contentDescription = null,
+                                                                                tint = DarkRefTheme.AccentMint,
+                                                                                modifier = Modifier.size(16.dp)
+                                                                            )
+                                                                        } else {
+                                                                            Spacer(modifier = Modifier.size(16.dp))
+                                                                        }
+                                                                        Text(
+                                                                            text = stringResource(order.labelResId),
+                                                                            color = if (isCurrent) DarkRefTheme.AccentMint else DarkRefTheme.TextPrimary,
+                                                                            fontSize = 13.sp,
+                                                                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
+                                                                        )
+                                                                    }
+                                                                },
+                                                                onClick = {
+                                                                    trackSortOrder = order
+                                                                    showFavSortMenu = false
+                                                                }
+                                                            )
+                                                        }
+                                                    }
+                                                }
+
+                                                TextButton(onClick = {
+                                                    viewModel.playQueue(sortedFavorites, 0)
+                                                }) {
+                                                    Text(stringResource(R.string.btn_play_all), fontSize = 12.sp, color = DarkRefTheme.AccentMint, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (localFavorites.isEmpty()) {
+                                        item(key = "empty_favorites") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 40.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Немає улюблених треків.\nНатисніть ❤️ біля будь-якої пісні!",
+                                                    color = DarkRefTheme.TextSecondary,
+                                                    fontSize = 13.sp,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        items(
+                                            items = sortedFavorites,
+                                            key = { "fav_${it.id}" },
+                                            contentType = { "track" }
+                                        ) { track ->
+                                            TrackItemRow(
+                                                track = track,
+                                                onPlay = {
+                                                    viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                },
+                                                isFavorite = true,
+                                                isPlayingThisTrack = currentPlayingTrack?.id == track.id,
+                                                onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                                onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                                onTrackCardClick = {
+                                                    if (currentPlayingTrack?.id != track.id) {
+                                                        viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                    }
+                                                    showNowPlayingSheet = true
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                LibrarySubTab.PLAYLISTS -> {
+                                    // Section: Playlists
+                                    item(key = "library_playlists_header") {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "${stringResource(R.string.header_playlists)} (${localPlaylists.size})",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = DarkRefTheme.TextPrimary
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            OutlinedTextField(
+                                                value = newPlaylistNameInput,
+                                                onValueChange = { newPlaylistNameInput = it },
+                                                placeholder = { Text(stringResource(R.string.new_playlist_hint), fontSize = 12.sp, color = DarkRefTheme.TextSecondary) },
+                                                modifier = Modifier.weight(1f),
+                                                singleLine = true,
+                                                colors = OutlinedTextFieldDefaults.colors(
+                                                    focusedTextColor = DarkRefTheme.TextPrimary,
+                                                    unfocusedTextColor = DarkRefTheme.TextPrimary
+                                                )
+                                            )
+                                            Button(
+                                                onClick = {
+                                                    if (newPlaylistNameInput.isNotBlank()) {
+                                                        val name = newPlaylistNameInput.trim()
+                                                        viewModel.createPlaylist(name)
+                                                        newPlaylistNameInput = ""
+                                                        Toast.makeText(context, "Плейліст «$name» створено!", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color.White)
+                                            ) {
+                                                Text(stringResource(R.string.btn_create), fontSize = 11.sp, color = DarkRefTheme.BackgroundDark, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+
+                                    if (localPlaylists.isEmpty()) {
+                                        item(key = "empty_playlists") {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 40.dp),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Text(
+                                                    text = "Немає створених плейлістів.\nВведіть назву вище та натисніть «Створити»!",
+                                                    color = DarkRefTheme.TextSecondary,
+                                                    fontSize = 13.sp,
+                                                    textAlign = TextAlign.Center
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        items(
+                                            items = localPlaylists,
+                                            key = { "pl_${it.id}" },
+                                            contentType = { "playlist" }
+                                        ) { pl ->
+                                            LocalPlaylistCard(
+                                                playlist = pl,
+                                                viewModel = viewModel,
+                                                isExpanded = expandedPlaylistId == pl.id,
+                                                onToggleExpand = {
+                                                    expandedPlaylistId = if (expandedPlaylistId == pl.id) null else pl.id
+                                                },
+                                                onDelete = {
+                                                    viewModel.deleteLocalPlaylist(pl.id)
+                                                    Toast.makeText(context, "Плейліст видалено", Toast.LENGTH_SHORT).show()
+                                                },
+                                                onPlayAll = { viewModel.playLocalPlaylist(pl.id) }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -882,9 +1171,7 @@ fun PlayerCoreScreen() {
                 AppTopBar(
                     currentUser = currentUser,
                     isOnline = isOnline,
-                    onAccountClick = { showAccountDialog = true },
-                    onEqualizerClick = { showEqualizerDialog = true },
-                    onSettingsClick = { showSettingsDialog = true }
+                    onAccountClick = { showAccountDialog = true }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))

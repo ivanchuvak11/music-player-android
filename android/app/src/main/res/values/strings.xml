@@ -130,4 +130,13 @@
     <string name="permission_bluetooth_desc">Дозвіл Bluetooth дозволяє кнопкам на навушниках та в авто керувати плеєром.</string>
     <string name="permission_grant">Надати дозвіл</string>
     <string name="permission_settings">Відкрити налаштування</string>
+
+    <!-- Sorting -->
+    <string name="sort_button">Сортування</string>
+    <string name="sort_default">За замовчуванням</string>
+    <string name="sort_title_asc">Назва (А — Я)</string>
+    <string name="sort_title_desc">Назва (Я — А)</string>
+    <string name="sort_artist_asc">За виконавцем</string>
+    <string name="sort_duration_desc">Найдовші</string>
+    <string name="sort_duration_asc">Найкоротші</string>
 </resources>

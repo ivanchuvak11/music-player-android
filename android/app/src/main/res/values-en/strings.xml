@@ -130,4 +130,13 @@
     <string name="permission_bluetooth_desc">Bluetooth permission allows headphones and car controls to interact with the player.</string>
     <string name="permission_grant">Grant Permission</string>
     <string name="permission_settings">Open Settings</string>
+
+    <!-- Sorting -->
+    <string name="sort_button">Sort</string>
+    <string name="sort_default">Default</string>
+    <string name="sort_title_asc">Title (A — Z)</string>
+    <string name="sort_title_desc">Title (Z — A)</string>
+    <string name="sort_artist_asc">Artist</string>
+    <string name="sort_duration_desc">Longest</string>
+    <string name="sort_duration_asc">Shortest</string>
 </resources>
