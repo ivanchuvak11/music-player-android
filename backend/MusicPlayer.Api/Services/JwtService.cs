@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.IdentityModel.Tokens;
 using MusicPlayer.Api.Models;
@@ -15,7 +16,7 @@ public class JwtService
         _configuration = configuration;
     }
 
-    public string GenerateToken(User user)
+    public string GenerateAccessToken(User user)
     {
         var key = _configuration["Jwt:Key"]
             ?? throw new InvalidOperationException("JWT Key is not configured.");
@@ -40,14 +41,30 @@ public class JwtService
             signingKey,
             SecurityAlgorithms.HmacSha256);
 
+        // Access token expires in 2 hours
         var token = new JwtSecurityToken(
             issuer: issuer,
             audience: audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddDays(7),
+            expires: DateTime.UtcNow.AddHours(2),
             signingCredentials: credentials
         );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
+
+    public string GenerateToken(User user) => GenerateAccessToken(user);
+
+    public string GenerateRefreshToken()
+    {
+        var randomBytes = new byte[64];
+        using var rng = RandomNumberGenerator.Create();
+        rng.GetBytes(randomBytes);
+        return Convert.ToBase64String(randomBytes)
+            .Replace("+", "-")
+            .Replace("/", "_")
+            .TrimEnd('=');
+    }
+
+    public int GetAccessTokenExpirationSeconds() => 7200;
 }
