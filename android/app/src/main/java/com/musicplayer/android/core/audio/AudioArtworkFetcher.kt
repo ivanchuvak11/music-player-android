@@ -53,7 +53,7 @@ class AudioArtworkFetcher(
             try {
                 // If it's a MediaStore media uri, loadThumbnail extracts/retrieves cached thumbnail
                 if (!uriKey.contains("albumart")) {
-                    bitmap = context.contentResolver.loadThumbnail(data, Size(512, 512), null)
+                    bitmap = context.contentResolver.loadThumbnail(data, Size(128, 128), null)
                 }
             } catch (_: Exception) {
                 bitmap = null
@@ -64,7 +64,11 @@ class AudioArtworkFetcher(
         if (bitmap == null && uriKey.contains("albumart")) {
             try {
                 context.contentResolver.openInputStream(data)?.use { stream ->
-                    bitmap = BitmapFactory.decodeStream(stream)
+                    val opts = BitmapFactory.Options().apply {
+                        inSampleSize = 2
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    }
+                    bitmap = BitmapFactory.decodeStream(stream, null, opts)
                 }
             } catch (_: Exception) {
                 bitmap = null
@@ -88,7 +92,7 @@ class AudioArtworkFetcher(
                     BitmapFactory.decodeByteArray(rawPicture, 0, rawPicture.size, boundsOptions)
 
                     var inSample = 1
-                    val reqSize = 512
+                    val reqSize = 128
                     if (boundsOptions.outHeight > reqSize || boundsOptions.outWidth > reqSize) {
                         val halfH = boundsOptions.outHeight / 2
                         val halfW = boundsOptions.outWidth / 2
@@ -99,7 +103,7 @@ class AudioArtworkFetcher(
 
                     val decodeOptions = BitmapFactory.Options().apply {
                         inSampleSize = inSample
-                        inPreferredConfig = Bitmap.Config.ARGB_8888
+                        inPreferredConfig = Bitmap.Config.RGB_565
                     }
                     bitmap = BitmapFactory.decodeByteArray(rawPicture, 0, rawPicture.size, decodeOptions)
                 }

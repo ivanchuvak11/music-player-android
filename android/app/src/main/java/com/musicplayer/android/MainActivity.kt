@@ -188,6 +188,28 @@ fun PlayerCoreScreen() {
         }
     }
 
+    // Debounced search query (400ms delay per ТЗ Section 3)
+    LaunchedEffect(unifiedSearchQuery, isOnline) {
+        val q = unifiedSearchQuery.trim()
+        if (q.isNotBlank()) {
+            kotlinx.coroutines.delay(400L)
+            if (isOnline) {
+                viewModel.searchYouTube(q)
+                viewModel.searchSoundCloud(q)
+                viewModel.searchJamendo(q)
+                viewModel.searchAudius(q)
+                viewModel.searchAllSources(q)
+            } else {
+                viewModel.searchCachedTracks(q)
+            }
+        } else {
+            viewModel.searchYouTube("")
+            viewModel.searchSoundCloud("")
+            viewModel.searchJamendo("")
+            viewModel.searchAudius("")
+        }
+    }
+
     // Permission launcher
     val multiplePermissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -1244,21 +1266,7 @@ fun PlayerCoreScreen() {
 
                 OutlinedTextField(
                     value = unifiedSearchQuery,
-                    onValueChange = {
-                        unifiedSearchQuery = it
-                        if (it.isNotBlank()) {
-                            val trimmed = it.trim()
-                            viewModel.searchYouTube(trimmed)
-                            viewModel.searchSoundCloud(trimmed)
-                            viewModel.searchJamendo(trimmed)
-                            viewModel.searchAudius(trimmed)
-                        } else {
-                            viewModel.searchYouTube("")
-                            viewModel.searchSoundCloud("")
-                            viewModel.searchJamendo("")
-                            viewModel.searchAudius("")
-                        }
-                    },
+                    onValueChange = { unifiedSearchQuery = it },
                     placeholder = {
                         Text(
                             stringResource(R.string.search_placeholder),
