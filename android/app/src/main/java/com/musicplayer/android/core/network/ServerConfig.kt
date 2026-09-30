@@ -41,6 +41,6 @@ object ServerConfig {
 
     private fun String?.isAbsoluteHttpUrl(): Boolean {
         return this?.startsWith("http://", ignoreCase = true) == true ||
-            this.startsWith("https://", ignoreCase = true)
+            this?.startsWith("https://", ignoreCase = true) == true
     }
 }
