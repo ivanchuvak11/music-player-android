@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <!-- Base configuration: permit cleartext HTTP so local Wi-Fi dev servers and HTTP radio streams function smoothly -->
+    <!-- Development & testing: Allow HTTP traffic for local dev servers (LAN IPs) and HTTP radio streams -->
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
             <certificates src="system" />

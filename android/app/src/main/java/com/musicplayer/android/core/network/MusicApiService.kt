@@ -119,7 +119,7 @@ interface MusicApiService {
     @GET("api/audius/tracks/{id}")
     suspend fun getAudiusTrack(@Path("id") id: String): Response<AudiusTrackDto>
 
-    // SoundCloud (Optional / Planned streaming integration)
+    // SoundCloud (Streaming integration)
     @GET("api/soundcloud/search")
     suspend fun searchSoundCloudTracks(
         @Query("q") query: String,
@@ -128,4 +128,14 @@ interface MusicApiService {
 
     @GET("api/soundcloud/tracks/{id}")
     suspend fun getSoundCloudTrack(@Path("id") id: String): Response<SoundCloudTrackDto>
+
+    // YouTube Music (Streaming integration)
+    @GET("api/youtube/search")
+    suspend fun searchYouTubeTracks(
+        @Query("q") query: String,
+        @Query("limit") limit: Int = 20
+    ): Response<List<YouTubeTrackDto>>
+
+    @GET("api/youtube/tracks/{id}")
+    suspend fun getYouTubeTrack(@Path("id") id: String): Response<YouTubeTrackDto>
 }

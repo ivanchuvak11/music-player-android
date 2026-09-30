@@ -52,6 +52,8 @@ import kotlinx.coroutines.flow.map
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.calculateSearchRelevanceScore
 import com.musicplayer.android.core.audio.toAudioTrack
+import com.musicplayer.android.core.network.SoundCloudTrackDto
+import com.musicplayer.android.core.network.YouTubeTrackDto
 import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 import com.musicplayer.android.ui.components.*
 import com.musicplayer.android.ui.screens.*
@@ -126,12 +128,15 @@ fun PlayerCoreScreen() {
     }.collectAsState(initial = null)
 
     val localTracks by viewModel.localTracks.collectAsState()
-    val trendingAudius by viewModel.trendingAudiusTracks.collectAsState()
+    val trendingOnlineTracks by viewModel.trendingOnlineTracks.collectAsState()
     val searchedAudius by viewModel.searchedAudiusTracks.collectAsState()
     val searchedJamendo by viewModel.searchedJamendoTracks.collectAsState()
+    val searchedYouTube by viewModel.searchedYouTubeTracks.collectAsState()
+    val searchedSoundCloud by viewModel.searchedSoundCloudTracks.collectAsState()
     val cachedTracks by viewModel.searchedCachedTracks.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val authStatus by viewModel.authStatusMessage.collectAsState()
+    val onlineSearchError by viewModel.onlineSearchError.collectAsState()
     val isOnline by viewModel.isOnline.collectAsState()
 
     val audioEffectsState by viewModel.audioEffectsState.collectAsState()
@@ -268,7 +273,7 @@ fun PlayerCoreScreen() {
                 // Search Results (memoized to avoid re-filtering on scroll)
                 val q = unifiedSearchQuery.trim()
                 val (filteredLocal, filteredCached, onlineResults) = remember(
-                    q, localTracks, cachedTracks, searchedJamendo, searchedAudius
+                    q, localTracks, cachedTracks, searchedYouTube, searchedSoundCloud, searchedJamendo, searchedAudius
                 ) {
                     val loc = localTracks
                         .filter { it.calculateSearchRelevanceScore(q) >= 0 }
@@ -276,7 +281,9 @@ fun PlayerCoreScreen() {
                     val cac = cachedTracks
                         .filter { it.toAudioTrack().calculateSearchRelevanceScore(q) >= 0 }
                         .sortedByDescending { it.toAudioTrack().calculateSearchRelevanceScore(q) }
-                    val rawOnline = searchedJamendo.map { AudioTrack.fromJamendo(it, viewModel.getBaseUrl()) } +
+                    val rawOnline = searchedYouTube.map { AudioTrack.fromYouTube(it, viewModel.getBaseUrl()) } +
+                        searchedSoundCloud.map { AudioTrack.fromSoundCloud(it, viewModel.getBaseUrl()) } +
+                        searchedJamendo.map { AudioTrack.fromJamendo(it, viewModel.getBaseUrl()) } +
                         searchedAudius.map { AudioTrack.fromAudius(it, viewModel.getBaseUrl()) }
                     val onl = rawOnline
                         .filter { it.calculateSearchRelevanceScore(q) >= 0 }
@@ -346,7 +353,12 @@ fun PlayerCoreScreen() {
                         ) { track ->
                             TrackItemRow(
                                 track = track,
-                                onPlay = { playOnlineSafely { viewModel.playTrack(track) } },
+                                onPlay = {
+                                    playOnlineSafely {
+                                        val idx = onlineResults.indexOf(track).coerceAtLeast(0)
+                                        viewModel.playQueue(onlineResults, idx)
+                                    }
+                                },
                                 isFavorite = track.id in favoriteTrackIds,
                                 isPlayingThisTrack = currentPlayingTrack?.id == track.id,
                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
@@ -354,7 +366,8 @@ fun PlayerCoreScreen() {
                                 onTrackCardClick = {
                                     playOnlineSafely {
                                         if (currentPlayingTrack?.id != track.id) {
-                                            viewModel.playTrack(track)
+                                            val idx = onlineResults.indexOf(track).coerceAtLeast(0)
+                                            viewModel.playQueue(onlineResults, idx)
                                         }
                                         showNowPlayingSheet = true
                                     }
@@ -362,13 +375,62 @@ fun PlayerCoreScreen() {
                             )
                         }
                     }
+
+                    if (onlineSearchError != null && onlineResults.isEmpty()) {
+                        item(key = "search_online_error_banner") {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = Color(0xFF2A1616),
+                                border = BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.35f)),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFF5252),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "Онлайн-пошук недоступний",
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFFF6B6B),
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = onlineSearchError ?: "Не вдалося з'єднатися з сервером.",
+                                        color = DarkRefTheme.TextSecondary,
+                                        fontSize = 12.sp,
+                                        lineHeight = 16.sp
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Button(
+                                        onClick = { showSettingsDialog = true },
+                                        colors = ButtonDefaults.buttonColors(containerColor = DarkRefTheme.SurfaceCardElevated),
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text("Налаштування сервера ⚙️", color = DarkRefTheme.AccentMint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             } else {
                 when (currentTab) {
                     NavigationTab.HOME -> {
                         // TAB 1: HOME (Featured releases with big frosted cards like reference photo)
-                        val featuredTracks = remember(trendingAudius, localTracks) {
-                            (trendingAudius.map { AudioTrack.fromAudius(it, viewModel.getBaseUrl()) } + localTracks).take(6)
+                        val featuredTracks = remember(trendingOnlineTracks, localTracks) {
+                            if (trendingOnlineTracks.isNotEmpty()) {
+                                (trendingOnlineTracks.take(12) + localTracks.take(4))
+                            } else {
+                                localTracks.take(6)
+                            }
                         }
 
                         LazyColumn(
@@ -398,7 +460,8 @@ fun PlayerCoreScreen() {
                                                 track = track,
                                                 onPlay = {
                                                     playOnlineSafely {
-                                                        viewModel.playTrack(track)
+                                                        val idx = featuredTracks.indexOf(track).coerceAtLeast(0)
+                                                        viewModel.playQueue(featuredTracks, idx)
                                                         showNowPlayingSheet = true
                                                     }
                                                 }
@@ -1183,9 +1246,17 @@ fun PlayerCoreScreen() {
                     value = unifiedSearchQuery,
                     onValueChange = {
                         unifiedSearchQuery = it
-                        if (it.isNotBlank() && isOnline) {
-                            viewModel.searchJamendo(it.trim())
-                            viewModel.searchAudius(it.trim())
+                        if (it.isNotBlank()) {
+                            val trimmed = it.trim()
+                            viewModel.searchYouTube(trimmed)
+                            viewModel.searchSoundCloud(trimmed)
+                            viewModel.searchJamendo(trimmed)
+                            viewModel.searchAudius(trimmed)
+                        } else {
+                            viewModel.searchYouTube("")
+                            viewModel.searchSoundCloud("")
+                            viewModel.searchJamendo("")
+                            viewModel.searchAudius("")
                         }
                     },
                     placeholder = {
@@ -1215,7 +1286,13 @@ fun PlayerCoreScreen() {
                     },
                     trailingIcon = {
                         if (unifiedSearchQuery.isNotEmpty()) {
-                            IconButton(onClick = { unifiedSearchQuery = "" }) {
+                            IconButton(onClick = {
+                                unifiedSearchQuery = ""
+                                viewModel.searchYouTube("")
+                                viewModel.searchSoundCloud("")
+                                viewModel.searchJamendo("")
+                                viewModel.searchAudius("")
+                            }) {
                                 Icon(
                                     imageVector = Icons.Rounded.Close,
                                     contentDescription = "Clear",

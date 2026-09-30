@@ -33,6 +33,8 @@ import com.musicplayer.android.core.network.PlaylistDetailDto
 import com.musicplayer.android.core.network.PlaylistSummaryDto
 import com.musicplayer.android.core.network.RadioStationDto
 import com.musicplayer.android.core.network.RegisterRequestDto
+import com.musicplayer.android.core.network.SoundCloudTrackDto
+import com.musicplayer.android.core.network.YouTubeTrackDto
 import com.musicplayer.android.core.session.SessionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -107,6 +109,21 @@ class MainPlayerViewModel(
     private val _searchedAudiusTracks = MutableStateFlow<List<AudiusTrackDto>>(emptyList())
     val searchedAudiusTracks: StateFlow<List<AudiusTrackDto>> = _searchedAudiusTracks.asStateFlow()
 
+    // YouTube Music online tracks
+    private val _searchedYouTubeTracks = MutableStateFlow<List<YouTubeTrackDto>>(emptyList())
+    val searchedYouTubeTracks: StateFlow<List<YouTubeTrackDto>> = _searchedYouTubeTracks.asStateFlow()
+
+    // SoundCloud online tracks
+    private val _searchedSoundCloudTracks = MutableStateFlow<List<SoundCloudTrackDto>>(emptyList())
+    val searchedSoundCloudTracks: StateFlow<List<SoundCloudTrackDto>> = _searchedSoundCloudTracks.asStateFlow()
+
+    // Unified Trending / Popular online tracks (YouTube, Audius, SoundCloud)
+    private val _trendingOnlineTracks = MutableStateFlow<List<AudioTrack>>(emptyList())
+    val trendingOnlineTracks: StateFlow<List<AudioTrack>> = _trendingOnlineTracks.asStateFlow()
+
+    private val _onlineSearchError = MutableStateFlow<String?>(null)
+    val onlineSearchError: StateFlow<String?> = _onlineSearchError.asStateFlow()
+
     // Playlists from backend
     private val _playlists = MutableStateFlow<List<PlaylistSummaryDto>>(emptyList())
     val playlists: StateFlow<List<PlaylistSummaryDto>> = _playlists.asStateFlow()
@@ -167,6 +184,8 @@ class MainPlayerViewModel(
 
     private var jamendoSearchJob: Job? = null
     private var audiusSearchJob: Job? = null
+    private var youtubeSearchJob: Job? = null
+    private var soundCloudSearchJob: Job? = null
     private var lastPositionSaveTimeMs = 0L
 
     // ─── Unified multi-source search state (ТЗ Section 3) ─────────────────────
@@ -227,6 +246,7 @@ class MainPlayerViewModel(
 
         // Fix #10: Debounce media changes by 1500ms to avoid 30 redundant scans per download
         loadLocalTracks()
+        loadTrendingOnlineTracks()
         viewModelScope.launch {
             try {
                 localScanner.observeMediaChanges()
@@ -417,6 +437,7 @@ class MainPlayerViewModel(
         val normalized = if (newUrl.endsWith("/")) newUrl else "$newUrl/"
         sessionManager.saveBaseUrl(normalized)
         apiService = NetworkClient.createService(normalized, getApplication())
+        loadTrendingOnlineTracks()
         if (sessionManager.isLoggedIn()) {
             validateSession()
             loadBackendData()
@@ -499,6 +520,30 @@ class MainPlayerViewModel(
             playQueue(audioTracks, index)
         } else {
             playTrack(AudioTrack.fromAudius(track, baseUrl))
+        }
+    }
+
+    fun playYouTubeTrack(track: com.musicplayer.android.core.network.YouTubeTrackDto) {
+        val baseUrl = sessionManager.getBaseUrl()
+        val allYouTube = _searchedYouTubeTracks.value
+        if (allYouTube.isNotEmpty()) {
+            val audioTracks = allYouTube.map { AudioTrack.fromYouTube(it, baseUrl) }
+            val index = allYouTube.indexOfFirst { it.externalId == track.externalId }.coerceAtLeast(0)
+            playQueue(audioTracks, index)
+        } else {
+            playTrack(AudioTrack.fromYouTube(track, baseUrl))
+        }
+    }
+
+    fun playSoundCloudTrack(track: com.musicplayer.android.core.network.SoundCloudTrackDto) {
+        val baseUrl = sessionManager.getBaseUrl()
+        val allSoundCloud = _searchedSoundCloudTracks.value
+        if (allSoundCloud.isNotEmpty()) {
+            val audioTracks = allSoundCloud.map { AudioTrack.fromSoundCloud(it, baseUrl) }
+            val index = allSoundCloud.indexOfFirst { it.externalId == track.externalId }.coerceAtLeast(0)
+            playQueue(audioTracks, index)
+        } else {
+            playTrack(AudioTrack.fromSoundCloud(track, baseUrl))
         }
     }
 
@@ -598,6 +643,7 @@ class MainPlayerViewModel(
                 loadPlaylists()
                 loadFavoriteRadio()
                 loadFavoriteTracks()
+                loadTrendingOnlineTracks()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -607,9 +653,16 @@ class MainPlayerViewModel(
     /**
      * Fix #25: Debounced Jamendo search (400ms delay) to prevent hammering the network.
      */
+    private fun notifyOnlineSearchError(e: Throwable) {
+        if (e is CancellationException) return
+        val url = sessionManager.getBaseUrl()
+        _onlineSearchError.value = "Сервер недоступний ($url). Перевірте підключення до бекенду або адресу в Налаштуваннях."
+    }
+
     fun searchJamendo(query: String, limit: Int = 20) {
         if (query.isBlank()) {
             _searchedJamendoTracks.value = emptyList()
+            _onlineSearchError.value = null
             return
         }
         jamendoSearchJob?.cancel()
@@ -620,6 +673,7 @@ class MainPlayerViewModel(
                 val resp = apiService.searchJamendoTracks(query.trim(), limit)
                 if (resp.isSuccessful) {
                     _searchedJamendoTracks.value = resp.body().orEmpty()
+                    _onlineSearchError.value = null
                     if (_authStatusMessage.value?.startsWith("Jamendo") == true ||
                         _authStatusMessage.value?.startsWith("Помилка Jamendo") == true
                     ) {
@@ -632,6 +686,7 @@ class MainPlayerViewModel(
                 throw e
             } catch (e: Exception) {
                 _authStatusMessage.value = "Jamendo недоступний: ${e.message}"
+                notifyOnlineSearchError(e)
             } finally {
                 _isLoading.value = false
             }
@@ -644,6 +699,7 @@ class MainPlayerViewModel(
     fun searchAudius(query: String, limit: Int = 20) {
         if (query.isBlank()) {
             _searchedAudiusTracks.value = emptyList()
+            _onlineSearchError.value = null
             return
         }
         audiusSearchJob?.cancel()
@@ -653,9 +709,105 @@ class MainPlayerViewModel(
                 val resp = apiService.searchAudiusTracks(query.trim(), limit)
                 if (resp.isSuccessful) {
                     _searchedAudiusTracks.value = resp.body().orEmpty()
+                    _onlineSearchError.value = null
                 }
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+                notifyOnlineSearchError(e)
+            }
+        }
+    }
+
+    fun searchYouTube(query: String, limit: Int = 20) {
+        if (query.isBlank()) {
+            _searchedYouTubeTracks.value = emptyList()
+            _onlineSearchError.value = null
+            return
+        }
+        youtubeSearchJob?.cancel()
+        youtubeSearchJob = viewModelScope.launch {
+            delay(400L)
+            try {
+                val resp = apiService.searchYouTubeTracks(query.trim(), limit)
+                if (resp.isSuccessful) {
+                    _searchedYouTubeTracks.value = resp.body().orEmpty()
+                    _onlineSearchError.value = null
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+                notifyOnlineSearchError(e)
+            }
+        }
+    }
+
+    fun searchSoundCloud(query: String, limit: Int = 20) {
+        if (query.isBlank()) {
+            _searchedSoundCloudTracks.value = emptyList()
+            _onlineSearchError.value = null
+            return
+        }
+        soundCloudSearchJob?.cancel()
+        soundCloudSearchJob = viewModelScope.launch {
+            delay(400L)
+            try {
+                val resp = apiService.searchSoundCloudTracks(query.trim(), limit)
+                if (resp.isSuccessful) {
+                    _searchedSoundCloudTracks.value = resp.body().orEmpty()
+                    _onlineSearchError.value = null
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                e.printStackTrace()
+                notifyOnlineSearchError(e)
+            }
+        }
+    }
+
+    fun loadTrendingOnlineTracks() {
+        viewModelScope.launch {
+            try {
+                val baseUrl = getBaseUrl()
+                val tracks = mutableListOf<AudioTrack>()
+
+                // 1. YouTube Music top hits
+                try {
+                    val ytResp = apiService.searchYouTubeTracks("Ukraine Top Hits", 10)
+                    if (ytResp.isSuccessful && !ytResp.body().isNullOrEmpty()) {
+                        tracks.addAll(ytResp.body()!!.map { AudioTrack.fromYouTube(it, baseUrl) })
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                // 2. Audius trending
+                try {
+                    val audiusResp = apiService.getTrendingAudiusTracks(10)
+                    if (audiusResp.isSuccessful && !audiusResp.body().isNullOrEmpty()) {
+                        _trendingAudiusTracks.value = audiusResp.body()!!
+                        tracks.addAll(audiusResp.body()!!.map { AudioTrack.fromAudius(it, baseUrl) })
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                // 3. SoundCloud popular
+                try {
+                    val scResp = apiService.searchSoundCloudTracks("Top Hits", 10)
+                    if (scResp.isSuccessful && !scResp.body().isNullOrEmpty()) {
+                        tracks.addAll(scResp.body()!!.map { AudioTrack.fromSoundCloud(it, baseUrl) })
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                if (tracks.isNotEmpty()) {
+                    _trendingOnlineTracks.value = tracks
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
