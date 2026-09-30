@@ -76,4 +76,21 @@ public class CacheService
 
         return freshValue;
     }
+
+    public async Task RemoveAsync(
+        string key,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _cache.RemoveAsync(key, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Unable to remove cache entry {CacheKey}.",
+                key);
+        }
+    }
 }

@@ -14,12 +14,88 @@ public sealed class SoundCloudTokenProvider
     private string? _accessToken;
     private DateTimeOffset _expiresAt;
 
+    private string? _scrapedClientId;
+    private DateTimeOffset _clientIdExpiresAt;
+
     public SoundCloudTokenProvider(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration)
     {
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
+    }
+
+    public async Task<string> GetClientIdAsync(CancellationToken cancellationToken = default)
+    {
+        var configuredClientId = _configuration["SoundCloud:ClientId"];
+        if (!string.IsNullOrWhiteSpace(configuredClientId))
+            return configuredClientId;
+
+        if (HasValidCachedClientId())
+            return _scrapedClientId!;
+
+        await _refreshLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (HasValidCachedClientId())
+                return _scrapedClientId!;
+
+            var client = _httpClientFactory.CreateClient("SoundCloudAuth");
+            if (!client.DefaultRequestHeaders.Contains("User-Agent"))
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            }
+
+            var html = await client.GetStringAsync("https://soundcloud.com", cancellationToken);
+            var scriptMatches = System.Text.RegularExpressions.Regex.Matches(
+                html,
+                @"https://[a-zA-Z0-9\.\-_/]+\.js");
+
+            string? foundClientId = null;
+            // Iterate scripts in reverse (asset bundles with client_id are usually at the end)
+            for (int i = scriptMatches.Count - 1; i >= 0; i--)
+            {
+                var scriptUrl = scriptMatches[i].Value;
+                try
+                {
+                    var js = await client.GetStringAsync(scriptUrl, cancellationToken);
+                    var match = System.Text.RegularExpressions.Regex.Match(
+                        js,
+                        @"client_id\s*:\s*""([a-zA-Z0-9]{32})""");
+
+                    if (match.Success)
+                    {
+                        foundClientId = match.Groups[1].Value;
+                        break;
+                    }
+                }
+                catch
+                {
+                    // Ignore transient script download errors and try next
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(foundClientId))
+            {
+                throw new ExternalServiceConfigurationException(
+                    "Unable to discover SoundCloud client ID automatically.");
+            }
+
+            _scrapedClientId = foundClientId;
+            _clientIdExpiresAt = DateTimeOffset.UtcNow.AddHours(24);
+            return _scrapedClientId;
+        }
+        finally
+        {
+            _refreshLock.Release();
+        }
+    }
+
+    public void InvalidateClientId()
+    {
+        _scrapedClientId = null;
+        _clientIdExpiresAt = DateTimeOffset.MinValue;
     }
 
     public async Task<string> GetAccessTokenAsync(
@@ -99,6 +175,12 @@ public sealed class SoundCloudTokenProvider
         {
             _refreshLock.Release();
         }
+    }
+
+    private bool HasValidCachedClientId()
+    {
+        return !string.IsNullOrWhiteSpace(_scrapedClientId) &&
+               DateTimeOffset.UtcNow < _clientIdExpiresAt;
     }
 
     private bool HasValidCachedToken()
