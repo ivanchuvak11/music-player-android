@@ -158,33 +158,15 @@ class SessionManager(context: Context) {
 
     // Server Configuration
     fun getBaseUrl(): String {
-        return prefs.getString(KEY_BASE_URL, DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
+        val saved = prefs.getString(KEY_BASE_URL, null)
+        if (saved.isNullOrBlank() || saved.contains("152.70.19.219") || saved.contains("10.0.2.2") || saved.contains("example.com")) {
+            return DEFAULT_BASE_URL
+        }
+        return saved
     }
 
     fun saveBaseUrl(url: String) {
         val normalized = if (url.endsWith("/")) url else "$url/"
-        val isDebug = try {
-            (appContext.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
-        } catch (e: Exception) {
-            false
-        }
-        val uriHost = try {
-            java.net.URI(normalized).host.orEmpty()
-        } catch (e: Exception) {
-            ""
-        }
-        val isLocalOrPrivateIp = uriHost == "localhost" ||
-            uriHost == "10.0.2.2" ||
-            uriHost == "127.0.0.1" ||
-            uriHost.startsWith("192.168.") ||
-            uriHost.startsWith("10.") ||
-            uriHost.matches(Regex("""^172\.(1[6-9]|2[0-9]|3[0-1])\..*"""))
-
-        // In release builds, only prevent public cleartext HTTP URLs, but allow local Wi-Fi / dev IPs
-        if (!isDebug && !normalized.startsWith("https://") && !isLocalOrPrivateIp) {
-            Log.w(TAG, "Rejecting insecure public cleartext HTTP URL in release build: $normalized")
-            return
-        }
         if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) return
         prefs.edit().putString(KEY_BASE_URL, normalized).apply()
     }

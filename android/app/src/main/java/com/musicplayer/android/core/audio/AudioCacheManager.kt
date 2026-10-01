@@ -54,10 +54,14 @@ object AudioCacheManager {
 
         val defaultDataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
 
-        return CacheDataSource.Factory()
-            .setCache(getCache(context))
-            .setUpstreamDataSourceFactory(defaultDataSourceFactory)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        return try {
+            CacheDataSource.Factory()
+                .setCache(getCache(context))
+                .setUpstreamDataSourceFactory(defaultDataSourceFactory)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+        } catch (e: Throwable) {
+            defaultDataSourceFactory
+        }
     }
 
     fun isTrackCached(context: Context, audioUrl: String): Boolean {

@@ -156,6 +156,8 @@ class PlayerControllerImpl(
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                android.util.Log.e("PlayerController", "PlaybackException errorCode=${error.errorCode} (${error.errorCodeName}) msg=${error.message}", error)
+
                 val isNetworkError = error.errorCode in listOf(
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
                     PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
@@ -165,10 +167,11 @@ class PlayerControllerImpl(
                 ) || error.message?.contains("Unable to connect", ignoreCase = true) == true
                    || error.message?.contains("timeout", ignoreCase = true) == true
 
+                val detail = error.cause?.message ?: error.message ?: error.errorCodeName
                 val message = if (isNetworkError) {
-                    "Немає підключення до мережі або сервер недоступний. Ви можете слухати збережені пісні та музику з пам'яті пристрою офлайн."
+                    "Помилка мережі ($detail). Перевірте сервер або підключення."
                 } else {
-                    "Помилка відтворення: ${error.localizedMessage ?: "невідомий формат або пошкоджений файл"}"
+                    "Помилка відтворення: $detail"
                 }
 
                 _playbackState.value = _playbackState.value.copy(
