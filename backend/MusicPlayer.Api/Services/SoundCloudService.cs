@@ -80,6 +80,22 @@ public class SoundCloudService
             cancellationToken);
     }
 
+    public async Task<string?> GetStreamUrlAsync(
+        string trackId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(trackId))
+            return null;
+
+        trackId = trackId.Trim();
+
+        return await _cache.GetOrCreateAsync<string?>(
+            $"soundcloud:stream:{trackId}",
+            TimeSpan.FromHours(4),
+            () => ResolveStreamUrlAsync(trackId, cancellationToken),
+            cancellationToken);
+    }
+
     public async Task<HttpResponseMessage> GetStreamAsync(
         string trackId,
         string? rangeHeader,

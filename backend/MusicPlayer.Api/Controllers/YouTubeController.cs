@@ -83,25 +83,15 @@ public class YouTubeController : ControllerBase
             });
         }
 
-        var response = await _youtube.GetStreamAsync(
-            id,
-            Request.Headers.Range.ToString(),
-            cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
+        var streamUrl = await _youtube.GetStreamUrlAsync(id, cancellationToken);
+        if (string.IsNullOrWhiteSpace(streamUrl))
         {
-            var statusCode = UpstreamStatusMapper.ToClientStatus(
-                response.StatusCode);
-            response.Dispose();
-
-            return StatusCode(
-                statusCode,
-                new
-                {
-                    message = "Unable to get YouTube stream."
-                });
+            return NotFound(new
+            {
+                message = "Unable to get YouTube stream."
+            });
         }
 
-        return new UpstreamStreamResult(response);
+        return Redirect(streamUrl);
     }
 }
