@@ -91,7 +91,7 @@ public class SoundCloudService
 
         return await _cache.GetOrCreateAsync<string?>(
             $"soundcloud:stream:{trackId}",
-            TimeSpan.FromHours(4),
+            TimeSpan.FromMinutes(15),
             () => ResolveStreamUrlAsync(trackId, cancellationToken),
             cancellationToken);
     }
@@ -106,10 +106,10 @@ public class SoundCloudService
 
         trackId = trackId.Trim();
 
-        // Retrieve or resolve direct audio stream URL with 4h cache
+        // Retrieve or resolve direct audio stream URL with 15m cache
         var streamUrl = await _cache.GetOrCreateAsync<string?>(
             $"soundcloud:stream:{trackId}",
-            TimeSpan.FromHours(4),
+            TimeSpan.FromMinutes(15),
             () => ResolveStreamUrlAsync(trackId, cancellationToken),
             cancellationToken);
 
@@ -133,8 +133,11 @@ public class SoundCloudService
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
 
-        // If direct stream URL expired or forbidden, invalidate stream cache and retry once
-        if (response.StatusCode == HttpStatusCode.Forbidden || response.StatusCode == HttpStatusCode.Gone)
+        // If direct stream URL expired or forbidden/not found, invalidate stream cache and retry once
+        if (response.StatusCode == HttpStatusCode.Forbidden ||
+            response.StatusCode == HttpStatusCode.Gone ||
+            response.StatusCode == HttpStatusCode.NotFound ||
+            response.StatusCode == HttpStatusCode.Unauthorized)
         {
             response.Dispose();
             await _cache.RemoveAsync($"soundcloud:stream:{trackId}");

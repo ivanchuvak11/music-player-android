@@ -13,6 +13,7 @@ namespace MusicPlayer.Api.Services;
 public class YouTubeService
 {
     private readonly YoutubeClient _youtube;
+    private readonly YoutubeClient _youtubeFallback;
     private readonly HttpClient _httpClient;
     private readonly CacheService _cache;
     private readonly ILogger<YouTubeService> _logger;
@@ -29,8 +30,9 @@ public class YouTubeService
 
         var cookies = LoadCookies(configuration, logger);
         _youtube = cookies != null && cookies.Count > 0
-            ? new YoutubeClient(httpClient, cookies)
-            : new YoutubeClient(httpClient);
+            ? new YoutubeClient(cookies)
+            : new YoutubeClient();
+        _youtubeFallback = new YoutubeClient();
     }
 
     public async Task<List<YouTubeTrackDto>> SearchAsync(
@@ -84,7 +86,7 @@ public class YouTubeService
 
         return await _cache.GetOrCreateAsync<string?>(
             cacheKey,
-            TimeSpan.FromHours(4),
+            TimeSpan.FromMinutes(30),
             () => FetchStreamUrlAsync(trackId, cancellationToken),
             cancellationToken);
     }
@@ -187,6 +189,7 @@ public class YouTubeService
         string trackId,
         CancellationToken cancellationToken)
     {
+        // 1. Try primary client (with cookies if available)
         try
         {
             var streamManifest = await _youtube.Videos.Streams
@@ -196,11 +199,29 @@ public class YouTubeService
                 .GetAudioOnlyStreams()
                 .GetWithHighestBitrate();
 
-            return audioStream?.Url;
+            if (audioStream != null)
+                return audioStream.Url;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to resolve YouTube audio stream for {TrackId}.", trackId);
+            _logger.LogWarning(ex, "Primary YouTube client failed for {TrackId}, trying fallback without cookies...", trackId);
+        }
+
+        // 2. Fallback to clean client without cookies
+        try
+        {
+            var fallbackManifest = await _youtubeFallback.Videos.Streams
+                .GetManifestAsync(trackId, cancellationToken);
+
+            var fallbackAudio = fallbackManifest
+                .GetAudioOnlyStreams()
+                .GetWithHighestBitrate();
+
+            return fallbackAudio?.Url;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "All YouTube clients failed to resolve stream for {TrackId}.", trackId);
             return null;
         }
     }
