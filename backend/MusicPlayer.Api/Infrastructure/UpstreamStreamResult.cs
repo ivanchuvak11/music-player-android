@@ -28,11 +28,7 @@ public sealed class UpstreamStreamResult : IActionResult
             CopyHeader(_upstreamResponse.Content.Headers.ContentRange, value =>
                 response.Headers[HeaderNames.ContentRange] = value.ToString());
 
-            if (_upstreamResponse.Headers.AcceptRanges.Count > 0)
-            {
-                response.Headers[HeaderNames.AcceptRanges] =
-                    _upstreamResponse.Headers.AcceptRanges.ToArray();
-            }
+            response.Headers[HeaderNames.AcceptRanges] = "bytes";
 
             if (_upstreamResponse.Headers.ETag is not null)
             {

@@ -112,13 +112,41 @@ public class YouTubeService
             };
         }
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, streamUrl);
+        var request = new HttpRequestMessage(HttpMethod.Get, streamUrl);
         request.ApplyRangeHeader(rangeHeader);
 
-        return await _httpClient.SendAsync(
+        var response = await _httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
+
+        if (response.StatusCode == HttpStatusCode.Forbidden || response.StatusCode == HttpStatusCode.Gone)
+        {
+            response.Dispose();
+            await _cache.RemoveAsync($"youtube:stream:{trackId.ToLowerInvariant()}");
+
+            var freshStreamUrl = await FetchStreamUrlAsync(trackId, cancellationToken);
+            if (string.IsNullOrWhiteSpace(freshStreamUrl))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = JsonContent.Create(new
+                    {
+                        message = "YouTube stream URL is no longer valid."
+                    })
+                };
+            }
+
+            var retryRequest = new HttpRequestMessage(HttpMethod.Get, freshStreamUrl);
+            retryRequest.ApplyRangeHeader(rangeHeader);
+
+            return await _httpClient.SendAsync(
+                retryRequest,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+        }
+
+        return response;
     }
 
     private async Task<List<YouTubeTrackDto>> FetchSearchAsync(

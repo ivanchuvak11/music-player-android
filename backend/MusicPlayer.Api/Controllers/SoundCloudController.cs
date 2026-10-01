@@ -86,15 +86,19 @@ public class SoundCloudController : ControllerBase
             });
         }
 
-        var streamUrl = await _soundCloud.GetStreamUrlAsync(id, cancellationToken);
-        if (string.IsNullOrWhiteSpace(streamUrl))
+        var response = await _soundCloud.GetStreamAsync(
+            id,
+            Request.Headers.Range.ToString(),
+            cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
         {
-            return NotFound(new
+            return StatusCode((int)response.StatusCode, new
             {
-                message = "Unable to get SoundCloud stream."
+                message = "Unable to stream SoundCloud audio."
             });
         }
 
-        return Redirect(streamUrl);
+        return new UpstreamStreamResult(response);
     }
 }

@@ -61,7 +61,7 @@ data class AudioTrack(
             )
         }
 
-        fun fromJamendo(track: JamendoTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack {
+        fun fromJamendo(track: JamendoTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL): AudioTrack {
             val streamUri = com.musicplayer.android.core.network.ServerConfig.resolveJamendoStreamUrl(
                 track.externalId,
                 track.streamUrl,
@@ -92,7 +92,7 @@ data class AudioTrack(
             )
         }
 
-        fun fromAudius(track: AudiusTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack {
+        fun fromAudius(track: AudiusTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL): AudioTrack {
             val streamUri = com.musicplayer.android.core.network.ServerConfig.resolveAudiusStreamUrl(
                 track.externalId,
                 backendBaseUrl
@@ -109,7 +109,7 @@ data class AudioTrack(
             )
         }
 
-        fun fromSoundCloud(track: SoundCloudTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack {
+        fun fromSoundCloud(track: SoundCloudTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL): AudioTrack {
             val streamUri = com.musicplayer.android.core.network.ServerConfig.resolveSoundCloudStreamUrl(
                 track.externalId,
                 track.streamUrl,
@@ -127,7 +127,7 @@ data class AudioTrack(
             )
         }
 
-        fun fromYouTube(track: com.musicplayer.android.core.network.YouTubeTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack {
+        fun fromYouTube(track: com.musicplayer.android.core.network.YouTubeTrackDto, backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL): AudioTrack {
             val streamUri = com.musicplayer.android.core.network.ServerConfig.resolveYouTubeStreamUrl(
                 track.externalId,
                 track.streamUrl,
