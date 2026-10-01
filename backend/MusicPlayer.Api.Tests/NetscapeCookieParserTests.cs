@@ -1,3 +1,4 @@
+using System.Net;
 using MusicPlayer.Api.Infrastructure;
 
 namespace MusicPlayer.Api.Tests;
@@ -42,5 +43,20 @@ public class NetscapeCookieParserTests
     {
         Assert.Empty(NetscapeCookieParser.Parse(string.Empty));
         Assert.Empty(NetscapeCookieParser.Parse("   "));
+    }
+
+    [Fact]
+    public void CookieContainer_Matches_Www_YouTube_Com()
+    {
+        var raw = """
+            .youtube.com	TRUE	/	TRUE	1790808350	VISITOR_INFO1_LIVE	test_visitor_val
+            """;
+        var cookies = NetscapeCookieParser.Parse(raw);
+        var container = new CookieContainer();
+        foreach (var c in cookies)
+            container.Add(c);
+
+        var matched = container.GetCookies(new Uri("https://www.youtube.com/youtubei/v1/player"));
+        Assert.Single(matched);
     }
 }

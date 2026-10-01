@@ -48,6 +48,8 @@ services:
       - Jwt__Key=local-development-secret-key-for-music-player-api-2026
       - Jwt__Issuer=MusicPlayer.Api
       - Jwt__Audience=MusicPlayer.Android
+    volumes:
+      - ./backend/MusicPlayer.Api/cookies.txt:/app/cookies.txt:ro
     depends_on:
       postgres:
         condition: service_healthy
