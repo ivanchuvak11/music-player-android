@@ -5,7 +5,7 @@ package com.musicplayer.android.core.network
  */
 object ServerConfig {
     const val DEFAULT_LOCAL_BASE_URL = "http://10.0.2.2:5116/"
-    const val PRODUCTION_BASE_URL = "http://152.70.19.219/"
+    const val PRODUCTION_BASE_URL = "http://89.168.123.71:5116/"
     const val DEFAULT_BASE_URL = PRODUCTION_BASE_URL
 
     /**

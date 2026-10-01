@@ -62,6 +62,7 @@ data class UnifiedTrack(
                 if (!streamUrl.isNullOrBlank()) streamUrl
                 else "$base/api/jamendo/tracks/$externalId/stream"
             }
+            TrackSource.YOUTUBE    -> ServerConfig.resolveYouTubeStreamUrl(externalId, streamUrl, base)
             TrackSource.LOCAL      -> streamUrl.orEmpty()
         }
     }
@@ -103,6 +104,18 @@ data class UnifiedTrack(
             album = dto.album
         )
 
+        /** Construct from YouTubeTrackDto */
+        fun fromYouTube(dto: com.musicplayer.android.core.network.YouTubeTrackDto): UnifiedTrack = UnifiedTrack(
+            source = TrackSource.YOUTUBE,
+            externalId = dto.externalId,
+            title = dto.title,
+            artist = dto.artist,
+            artworkUrl = dto.artworkUrl,
+            durationMs = dto.durationMs ?: 0L,
+            streamUrl = dto.streamUrl,
+            album = null
+        )
+
         /** Construct from local AudioTrack */
         fun fromLocalAudioTrack(track: AudioTrack): UnifiedTrack = UnifiedTrack(
             source = TrackSource.LOCAL,
@@ -118,12 +131,13 @@ data class UnifiedTrack(
 }
 
 /**
- * Enum for the 4 supported track sources per ТЗ Section 2.
+ * Enum for the supported track sources.
  */
 enum class TrackSource(val value: String) {
     SOUNDCLOUD("soundcloud"),
     AUDIUS("audius"),
     JAMENDO("jamendo"),
+    YOUTUBE("youtube"),
     LOCAL("local");
 
     companion object {
@@ -131,6 +145,7 @@ enum class TrackSource(val value: String) {
             "soundcloud" -> SOUNDCLOUD
             "audius"     -> AUDIUS
             "jamendo"    -> JAMENDO
+            "youtube"    -> YOUTUBE
             "local"      -> LOCAL
             else         -> JAMENDO // safe default
         }
