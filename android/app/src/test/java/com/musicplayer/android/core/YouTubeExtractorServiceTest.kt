@@ -35,5 +35,15 @@ class YouTubeExtractorServiceTest {
         }
         assert(results.isNotEmpty()) { "Search results should not be empty" }
     }
+
+    @Test
+    fun testMusicSongsFilter() = kotlinx.coroutines.runBlocking {
+        val results = YouTubeExtractorService.search("японська музика", 10)
+        println("--- японська музика count: ${results.size} ---")
+        results.forEach {
+            println("Result: id=${it.externalId}, title=${it.title}, artist=${it.artist}, dur=${it.durationMs}")
+        }
+        assert(results.isNotEmpty()) { "Search results should not be empty" }
+    }
 }
 

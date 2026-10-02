@@ -12,6 +12,8 @@ import kotlinx.coroutines.coroutineScope
 import java.io.IOException
 import java.net.SocketTimeoutException
 
+import kotlinx.coroutines.withTimeoutOrNull
+
 /**
  * Use-case for multi-source parallel music search per ТЗ Sections 3 and 8.
  *
@@ -61,16 +63,33 @@ class MusicSearchUseCase(
         }
 
         return coroutineScope {
-            // SoundCloud search (Audius and Jamendo are disabled)
-            val soundCloudDeferred = async { fetchSoundCloud(query, limit) }
-            val soundCloudResult = soundCloudDeferred.await()
-            val soundCloudTracks = soundCloudResult.getOrElse { emptyList() }
+            val soundCloudDeferred = async {
+                withTimeoutOrNull(2500L) { fetchSoundCloud(query, limit) }
+                    ?: Result.failure(MusicSourceError.Timeout("soundcloud"))
+            }
+            val audiusDeferred = async {
+                withTimeoutOrNull(2500L) { fetchAudius(query, limit) }
+                    ?: Result.failure(MusicSourceError.Timeout("audius"))
+            }
+            val jamendoDeferred = async {
+                withTimeoutOrNull(2500L) { fetchJamendo(query, limit) }
+                    ?: Result.failure(MusicSourceError.Timeout("jamendo"))
+            }
 
-            val merged = mergeAndDeduplicateSources(soundCloudTracks, emptyList(), emptyList())
+            val soundCloudResult = soundCloudDeferred.await()
+            val audiusResult = audiusDeferred.await()
+            val jamendoResult = jamendoDeferred.await()
+            val soundCloudTracks = soundCloudResult.getOrElse { emptyList() }
+            val audiusTracks = audiusResult.getOrElse { emptyList() }
+            val jamendoTracks = jamendoResult.getOrElse { emptyList() }
+
+            val merged = mergeAndDeduplicateSources(soundCloudTracks, audiusTracks, jamendoTracks)
 
             // Collect per-source errors (for UI partial failure notification)
             val errors = mutableMapOf<String, MusicSourceError>()
             soundCloudResult.onFailure { err -> if (err is MusicSourceError) errors["soundcloud"] = err }
+            audiusResult.onFailure { err -> if (err is MusicSourceError) errors["audius"] = err }
+            jamendoResult.onFailure { err -> if (err is MusicSourceError) errors["jamendo"] = err }
 
             // Cache results if at least some results came back (ТЗ Section 5)
             if (merged.isNotEmpty()) {
