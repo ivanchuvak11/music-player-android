@@ -17,6 +17,9 @@ class MusicPlayerApp : Application(), ImageLoaderFactory {
             Log.e("MusicPlayerApp", "Uncaught exception on thread ${thread.name}", throwable)
             defaultHandler?.uncaughtException(thread, throwable)
         }
+
+        // Initialize client-side YouTube extractor
+        com.musicplayer.android.core.audio.YouTubeExtractorService.init()
     }
 
     override fun newImageLoader(): ImageLoader {

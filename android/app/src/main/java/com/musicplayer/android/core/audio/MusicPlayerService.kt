@@ -38,8 +38,27 @@ class MusicPlayerService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         // C1 FIX: Pass cache DataSource DIRECTLY to constructor so caching actually works
-        val dataSourceFactory = AudioCacheManager.buildCacheDataSourceFactory(this)
-        val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+        val baseCacheDataSourceFactory = AudioCacheManager.buildCacheDataSourceFactory(this)
+
+        // ResolvingDataSource: intercepts YouTube track URIs and resolves direct CDN audio streams on mobile client
+        val resolvingDataSourceFactory = androidx.media3.datasource.ResolvingDataSource.Factory(
+            baseCacheDataSourceFactory,
+            androidx.media3.datasource.ResolvingDataSource.Resolver { dataSpec ->
+                val uri = dataSpec.uri
+                val videoId = YouTubeExtractorService.extractVideoIdFromUri(uri)
+                if (videoId != null) {
+                    val resolvedUrl = YouTubeExtractorService.resolveAudioStreamUrlSync(videoId)
+                    if (!resolvedUrl.isNullOrBlank()) {
+                        return@Resolver dataSpec.buildUpon()
+                            .setUri(android.net.Uri.parse(resolvedUrl))
+                            .build()
+                    }
+                }
+                dataSpec
+            }
+        )
+
+        val mediaSourceFactory = DefaultMediaSourceFactory(resolvingDataSourceFactory)
 
         val audioAttributes = AudioAttributes.Builder()
             .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)

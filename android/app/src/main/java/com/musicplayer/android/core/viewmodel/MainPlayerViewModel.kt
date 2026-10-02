@@ -660,64 +660,16 @@ class MainPlayerViewModel(
     }
 
     fun searchJamendo(query: String, limit: Int = 20) {
-        if (query.isBlank()) {
-            _searchedJamendoTracks.value = emptyList()
-            _onlineSearchError.value = null
-            return
-        }
-        jamendoSearchJob?.cancel()
-        jamendoSearchJob = viewModelScope.launch {
-            delay(400L)
-            _isLoading.value = true
-            try {
-                val resp = apiService.searchJamendoTracks(query.trim(), limit)
-                if (resp.isSuccessful) {
-                    _searchedJamendoTracks.value = resp.body().orEmpty()
-                    _onlineSearchError.value = null
-                    if (_authStatusMessage.value?.startsWith("Jamendo") == true ||
-                        _authStatusMessage.value?.startsWith("Помилка Jamendo") == true
-                    ) {
-                        _authStatusMessage.value = null
-                    }
-                } else {
-                    _authStatusMessage.value = "Помилка Jamendo: HTTP ${resp.code()}"
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                _authStatusMessage.value = "Jamendo недоступний: ${e.message}"
-                notifyOnlineSearchError(e)
-            } finally {
-                _isLoading.value = false
-            }
-        }
+        // Disabled: Jamendo source is turned off
+        _searchedJamendoTracks.value = emptyList()
     }
 
     /**
      * Fix #25: Debounced Audius search (400ms delay).
      */
     fun searchAudius(query: String, limit: Int = 20) {
-        if (query.isBlank()) {
-            _searchedAudiusTracks.value = emptyList()
-            _onlineSearchError.value = null
-            return
-        }
-        audiusSearchJob?.cancel()
-        audiusSearchJob = viewModelScope.launch {
-            delay(400L)
-            try {
-                val resp = apiService.searchAudiusTracks(query.trim(), limit)
-                if (resp.isSuccessful) {
-                    _searchedAudiusTracks.value = resp.body().orEmpty()
-                    _onlineSearchError.value = null
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                e.printStackTrace()
-                notifyOnlineSearchError(e)
-            }
-        }
+        // Disabled: Audius source is turned off
+        _searchedAudiusTracks.value = emptyList()
     }
 
     fun searchYouTube(query: String, limit: Int = 20) {
@@ -730,10 +682,26 @@ class MainPlayerViewModel(
         youtubeSearchJob = viewModelScope.launch {
             delay(400L)
             try {
-                val resp = apiService.searchYouTubeTracks(query.trim(), limit)
-                if (resp.isSuccessful) {
-                    _searchedYouTubeTracks.value = resp.body().orEmpty()
+                var tracks: List<YouTubeTrackDto>? = null
+                try {
+                    val resp = apiService.searchYouTubeTracks(query.trim(), limit)
+                    if (resp.isSuccessful && !resp.body().isNullOrEmpty()) {
+                        tracks = resp.body()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+
+                if (tracks.isNullOrEmpty()) {
+                    // Direct client-side search via NewPipeExtractor
+                    tracks = com.musicplayer.android.core.audio.YouTubeExtractorService.search(query.trim(), limit)
+                }
+
+                if (!tracks.isNullOrEmpty()) {
+                    _searchedYouTubeTracks.value = tracks
                     _onlineSearchError.value = null
+                } else {
+                    _searchedYouTubeTracks.value = emptyList()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -776,26 +744,28 @@ class MainPlayerViewModel(
 
                 // 1. YouTube Music top hits
                 try {
-                    val ytResp = apiService.searchYouTubeTracks("Ukraine Top Hits", 10)
-                    if (ytResp.isSuccessful && !ytResp.body().isNullOrEmpty()) {
-                        tracks.addAll(ytResp.body()!!.map { AudioTrack.fromYouTube(it, baseUrl) })
+                    var ytTracks: List<YouTubeTrackDto>? = null
+                    try {
+                        val ytResp = apiService.searchYouTubeTracks("Ukraine Top Hits", 15)
+                        if (ytResp.isSuccessful && !ytResp.body().isNullOrEmpty()) {
+                            ytTracks = ytResp.body()
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+
+                    if (ytTracks.isNullOrEmpty()) {
+                        ytTracks = com.musicplayer.android.core.audio.YouTubeExtractorService.search("Ukraine Top Hits", 15)
+                    }
+
+                    if (!ytTracks.isNullOrEmpty()) {
+                        tracks.addAll(ytTracks.map { AudioTrack.fromYouTube(it, baseUrl) })
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
                 }
 
-                // 2. Audius trending
-                try {
-                    val audiusResp = apiService.getTrendingAudiusTracks(10)
-                    if (audiusResp.isSuccessful && !audiusResp.body().isNullOrEmpty()) {
-                        _trendingAudiusTracks.value = audiusResp.body()!!
-                        tracks.addAll(audiusResp.body()!!.map { AudioTrack.fromAudius(it, baseUrl) })
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-
-                // 3. SoundCloud popular
+                // 2. SoundCloud popular
                 try {
                     val scResp = apiService.searchSoundCloudTracks("Top Hits", 10)
                     if (scResp.isSuccessful && !scResp.body().isNullOrEmpty()) {
