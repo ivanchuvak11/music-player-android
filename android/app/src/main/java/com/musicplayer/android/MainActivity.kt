@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.rounded.NorthWest
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Checklist
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -51,6 +53,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.calculateSearchRelevanceScore
+import com.musicplayer.android.core.audio.searchDeduplicationKey
 import com.musicplayer.android.core.audio.toAudioTrack
 import com.musicplayer.android.core.network.SoundCloudTrackDto
 import com.musicplayer.android.core.network.YouTubeTrackDto
@@ -129,9 +132,8 @@ fun PlayerCoreScreen() {
 
     val localTracks by viewModel.localTracks.collectAsState()
     val trendingOnlineTracks by viewModel.trendingOnlineTracks.collectAsState()
-    val searchedYouTube by viewModel.searchedYouTubeTracks.collectAsState()
-    val searchedSoundCloud by viewModel.searchedSoundCloudTracks.collectAsState()
-    val cachedTracks by viewModel.searchedCachedTracks.collectAsState()
+    val searchUiResults by viewModel.searchUiResults.collectAsState()
+    val searchSuggestions by viewModel.searchSuggestions.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val authStatus by viewModel.authStatusMessage.collectAsState()
     val onlineSearchError by viewModel.onlineSearchError.collectAsState()
@@ -186,22 +188,9 @@ fun PlayerCoreScreen() {
         }
     }
 
-    // Debounced search query (400ms delay per ТЗ Section 3)
+    // High-performance background search pipeline (computed on Dispatchers.Default, zero UI freeze)
     LaunchedEffect(unifiedSearchQuery, isOnline) {
-        val q = unifiedSearchQuery.trim()
-        if (q.isNotBlank()) {
-            kotlinx.coroutines.delay(400L)
-            if (isOnline) {
-                viewModel.searchYouTube(q)
-                viewModel.searchSoundCloud(q)
-                viewModel.searchAllSources(q)
-            } else {
-                viewModel.searchCachedTracks(q)
-            }
-        } else {
-            viewModel.searchYouTube("")
-            viewModel.searchSoundCloud("")
-        }
+        viewModel.updateSearchQuery(unifiedSearchQuery)
     }
 
     // Permission launcher
@@ -286,31 +275,74 @@ fun PlayerCoreScreen() {
         Box(modifier = Modifier.fillMaxSize()) {
             // MAIN CONTENT BY SELECTED TAB OR SEARCH
             if (unifiedSearchQuery.isNotBlank()) {
-                // Search Results (memoized to avoid re-filtering on scroll)
-                val q = unifiedSearchQuery.trim()
-                val (filteredLocal, filteredCached, onlineResults) = remember(
-                    q, localTracks, cachedTracks, searchedYouTube, searchedSoundCloud
-                ) {
-                    val loc = localTracks
-                        .filter { it.calculateSearchRelevanceScore(q) >= 0 }
-                        .sortedByDescending { it.calculateSearchRelevanceScore(q) }
-                    val cac = cachedTracks
-                        .filter { it.toAudioTrack().calculateSearchRelevanceScore(q) >= 0 }
-                        .sortedByDescending { it.toAudioTrack().calculateSearchRelevanceScore(q) }
-                    val rawOnline = searchedYouTube.map { AudioTrack.fromYouTube(it, viewModel.getBaseUrl()) } +
-                        searchedSoundCloud.map { AudioTrack.fromSoundCloud(it, viewModel.getBaseUrl()) }
-                    val onl = rawOnline
-                        .filter { it.calculateSearchRelevanceScore(q) >= 0 }
-                        .distinctBy { "${it.title.trim().lowercase()}_${it.artist.trim().lowercase()}" }
-                        .sortedByDescending { it.calculateSearchRelevanceScore(q) }
-                    Triple(loc, cac, onl)
-                }
+                val filteredLocal = searchUiResults.localTracks
+                val filteredCached = searchUiResults.cachedTracks
+                val onlineResults = searchUiResults.onlineResults
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = listContentPadding
                 ) {
+                    if (searchSuggestions.isNotEmpty()) {
+                        item(key = "search_suggestions_card") {
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = DarkRefTheme.SurfaceCard.copy(alpha = 0.85f),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                                    searchSuggestions.take(5).forEach { suggestion ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    unifiedSearchQuery = suggestion
+                                                    viewModel.updateSearchQuery(suggestion)
+                                                }
+                                                .padding(horizontal = 14.dp, vertical = 9.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Search,
+                                                contentDescription = null,
+                                                tint = DarkRefTheme.TextSecondary,
+                                                modifier = Modifier.size(17.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Text(
+                                                text = suggestion,
+                                                color = Color.White,
+                                                fontSize = 13.5.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            IconButton(
+                                                onClick = {
+                                                    unifiedSearchQuery = suggestion
+                                                    viewModel.updateSearchQuery(suggestion)
+                                                },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.NorthWest,
+                                                    contentDescription = "Apply suggestion",
+                                                    tint = DarkRefTheme.TextSecondary.copy(alpha = 0.7f),
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     item(key = "search_summary") {
                         Text(
                             text = "Знайдено: ${filteredLocal.size + filteredCached.size + onlineResults.size}",

@@ -486,6 +486,84 @@ class AudioModelTest {
     }
 
     @Test
+    fun testSearchRankingUsesFieldCoverageAndBoundedFuzzyMatches() {
+        fun track(title: String, artist: String = "Unknown") = AudioTrack(
+            id = title,
+            title = title,
+            artist = artist,
+            audioUrl = "http://example.com/$title.mp3"
+        )
+
+        val titleAndArtistMatch = track("Hello", "Adele")
+        val titleOnlyMatch = track("Hello", "Someone Else")
+        val typoMatch = track("Believer")
+        val substringMatch = track("Believer")
+        val repeatedWordMatch = track("Hello")
+
+        assertTrue(
+            titleAndArtistMatch.calculateSearchRelevanceScore("Adele Hello") >
+                titleOnlyMatch.calculateSearchRelevanceScore("Adele Hello")
+        )
+        assertTrue(
+            typoMatch.calculateSearchRelevanceScore("believre") >
+                substringMatch.calculateSearchRelevanceScore("liev")
+        )
+        assertTrue(repeatedWordMatch.calculateSearchRelevanceScore("hello hello") < 300)
+    }
+
+    @Test
+    fun testSearchRelevanceCorpusKeepsExactPrefixAheadOfTypoAndInfix() {
+        fun track(title: String, artist: String = "Unknown") = AudioTrack(
+            id = title,
+            title = title,
+            artist = artist,
+            audioUrl = "http://example.com/$title.mp3"
+        )
+
+        val exactPrefix = track("Shape of You (Live)")
+        val typo = track("Shspe of You")
+        val internalFragment = track("Believer")
+        val exactArtist = track("Unrelated", "Liev")
+        val crossField = track("Hello", "Adele")
+        val titleOnly = track("Hello", "Someone Else")
+
+        assertTrue(
+            exactPrefix.calculateSearchRelevanceScore("shape of you") >
+                typo.calculateSearchRelevanceScore("shape of you")
+        )
+        assertTrue(
+            exactArtist.calculateSearchRelevanceScore("liev") >
+                internalFragment.calculateSearchRelevanceScore("liev")
+        )
+        assertTrue(
+            crossField.calculateSearchRelevanceScore("Adele Hello") >
+                titleOnly.calculateSearchRelevanceScore("Adele Hello")
+        )
+        assertEquals(800, track("Shape of You").calculateSearchRelevanceScore("shape of y"))
+        assertEquals(
+            1000,
+            track("Beyonc\u00e9: Halo").calculateSearchRelevanceScore("Beyonce Halo")
+        )
+        assertEquals(750, track("AC/DC").calculateSearchRelevanceScore("ACDC"))
+        assertEquals(750, track("God's Plan").calculateSearchRelevanceScore("Gods Plan"))
+        assertTrue(track("Heartbreaker").calculateSearchRelevanceScore("break") < 300)
+        assertTrue(track("Beautiful").calculateSearchRelevanceScore("beatifull") > 0)
+        assertEquals(-1, track("Believer").calculateSearchRelevanceScore("beliivrr"))
+
+        // YouTube video noise tag stripping
+        assertEquals(1000, track("Numb (Official Music Video)", "Linkin Park").calculateSearchRelevanceScore("Numb"))
+        assertEquals(1000, track("In The End [Official Audio]", "Linkin Park").calculateSearchRelevanceScore("In The End"))
+
+        // Ukrainian Cyrillic to English transliteration
+        assertTrue(track("Bohemian Rhapsody", "Queen").calculateSearchRelevanceScore("квін") > 100)
+        assertTrue(track("Master of Puppets", "Metallica").calculateSearchRelevanceScore("металіка") > 100)
+
+        // Wrong keyboard layout (Ukrainian keyboard layout typing English query)
+        // "ьуефддшсф" typed instead of "metallica"
+        assertTrue(track("Master of Puppets", "Metallica").calculateSearchRelevanceScore("ьуефддшсф") > 100)
+    }
+
+    @Test
     fun testTrackDownloadManagerConstants() {
         assertEquals(150L * 1024 * 1024, com.musicplayer.android.core.audio.TrackDownloadManager.MAX_FILE_SIZE_BYTES)
         assertEquals(50L * 1024, com.musicplayer.android.core.audio.TrackDownloadManager.MIN_FILE_SIZE_BYTES)

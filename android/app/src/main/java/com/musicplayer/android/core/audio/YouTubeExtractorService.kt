@@ -95,6 +95,8 @@ object YouTubeExtractorService {
 
     /**
      * Searches YouTube directly from the device via NewPipeExtractor.
+     * Prioritizes YouTube Music songs (music_songs filter) for pristine studio track results,
+     * cleans out podcasts/long compilations (>20min), and falls back to videos if needed.
      */
     suspend fun search(query: String, limit: Int = 20): List<YouTubeTrackDto> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
@@ -102,38 +104,70 @@ object YouTubeExtractorService {
 
         return@withContext try {
             val service = ServiceList.YouTube
-            val handler = service.searchQHFactory.fromQuery(query.trim())
-            val searchInfo = SearchInfo.getInfo(service, handler)
-
             val tracks = mutableListOf<YouTubeTrackDto>()
-            for (item in searchInfo.relatedItems) {
-                if (item is StreamInfoItem) {
-                    val id = try {
-                        service.streamLHFactory.getId(item.url)
-                    } catch (e: Exception) {
-                        item.url.substringAfter("v=").substringBefore("&")
-                    }
+            val seenIds = mutableSetOf<String>()
 
-                    if (id.isNotBlank()) {
-                        val thumbnail = item.thumbnails.maxByOrNull { it.width * it.height }?.url
-                            ?: item.thumbnails.firstOrNull()?.url
+            fun collectItems(items: List<Any?>) {
+                for (item in items) {
+                    if (item is StreamInfoItem) {
+                        val durationSec = item.duration
+                        // Filter out podcasts, 1-hour albums, or 5-second junk clips (songs are 15s to 20min)
+                        if (durationSec > 1200L || (durationSec > 0 && durationSec < 15L)) continue
 
-                        tracks.add(
-                            YouTubeTrackDto(
-                                source = "youtube",
-                                externalId = id,
-                                title = item.name,
-                                artist = item.uploaderName.orEmpty().ifBlank { "YouTube" },
-                                artworkUrl = thumbnail,
-                                durationMs = if (item.duration > 0) item.duration * 1000L else null,
-                                youTubeUrl = item.url,
-                                streamUrl = null // Resolved lazily on playback
+                        val id = try {
+                            service.streamLHFactory.getId(item.url)
+                        } catch (e: Exception) {
+                            item.url.substringAfter("v=").substringBefore("&")
+                        }
+
+                        if (id.isNotBlank() && seenIds.add(id)) {
+                            val thumbnail = item.thumbnails.maxByOrNull { it.width * it.height }?.url
+                                ?: item.thumbnails.firstOrNull()?.url
+
+                            tracks.add(
+                                YouTubeTrackDto(
+                                    source = "youtube",
+                                    externalId = id,
+                                    title = item.name,
+                                    artist = item.uploaderName.orEmpty().ifBlank { "YouTube" },
+                                    artworkUrl = thumbnail,
+                                    durationMs = if (durationSec > 0) durationSec * 1000L else null,
+                                    youTubeUrl = item.url,
+                                    streamUrl = null // Resolved lazily on playback
+                                )
                             )
-                        )
-                        if (tracks.size >= limit) break
+                            if (tracks.size >= limit) break
+                        }
                     }
                 }
             }
+
+            // 1. Primary: YouTube Music songs filter (pure studio tracks, clean artist and title)
+            try {
+                val musicHandler = service.searchQHFactory.fromQuery(query.trim(), listOf("music_songs"), "")
+                val musicSearchInfo = SearchInfo.getInfo(service, musicHandler)
+                collectItems(musicSearchInfo.relatedItems)
+            } catch (e: Exception) {
+                Log.w(TAG, "music_songs search failed for '$query', falling back: ${e.message}")
+            }
+
+            // 2. Secondary: Supplement up to limit with regular video search (for thematic/genre queries and clips)
+            if (tracks.size < limit) {
+                try {
+                    val videoHandler = service.searchQHFactory.fromQuery(query.trim(), listOf("videos"), "")
+                    val videoSearchInfo = SearchInfo.getInfo(service, videoHandler)
+                    collectItems(videoSearchInfo.relatedItems)
+                } catch (e: Exception) {
+                    try {
+                        val fallbackHandler = service.searchQHFactory.fromQuery(query.trim())
+                        val fallbackInfo = SearchInfo.getInfo(service, fallbackHandler)
+                        collectItems(fallbackInfo.relatedItems)
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Video fallback search failed for '$query': ${e2.message}")
+                    }
+                }
+            }
+
             Log.d(TAG, "Search '$query' found ${tracks.size} tracks directly via client extractor")
             tracks
         } catch (e: Exception) {
