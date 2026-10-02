@@ -61,26 +61,16 @@ class MusicSearchUseCase(
         }
 
         return coroutineScope {
-            // Parallel fetch from all 3 sources
+            // SoundCloud search (Audius and Jamendo are disabled)
             val soundCloudDeferred = async { fetchSoundCloud(query, limit) }
-            val audiusDeferred     = async { fetchAudius(query, limit) }
-            val jamendoDeferred    = async { fetchJamendo(query, limit) }
-
             val soundCloudResult = soundCloudDeferred.await()
-            val audiusResult     = audiusDeferred.await()
-            val jamendoResult    = jamendoDeferred.await()
-
             val soundCloudTracks = soundCloudResult.getOrElse { emptyList() }
-            val audiusTracks     = audiusResult.getOrElse { emptyList() }
-            val jamendoTracks    = jamendoResult.getOrElse { emptyList() }
 
-            val merged = mergeAndDeduplicateSources(soundCloudTracks, audiusTracks, jamendoTracks)
+            val merged = mergeAndDeduplicateSources(soundCloudTracks, emptyList(), emptyList())
 
             // Collect per-source errors (for UI partial failure notification)
             val errors = mutableMapOf<String, MusicSourceError>()
             soundCloudResult.onFailure { err -> if (err is MusicSourceError) errors["soundcloud"] = err }
-            audiusResult.onFailure     { err -> if (err is MusicSourceError) errors["audius"]     = err }
-            jamendoResult.onFailure    { err -> if (err is MusicSourceError) errors["jamendo"]    = err }
 
             // Cache results if at least some results came back (ТЗ Section 5)
             if (merged.isNotEmpty()) {

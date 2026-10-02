@@ -126,4 +126,7 @@ dependencies {
 
     // Unit Testing
     testImplementation("junit:junit:4.13.2")
+
+    // NewPipeExtractor for direct client-side YouTube stream resolution
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.5")
 }

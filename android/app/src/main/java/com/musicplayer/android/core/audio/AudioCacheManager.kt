@@ -47,6 +47,7 @@ object AudioCacheManager {
 
     fun buildCacheDataSourceFactory(context: Context): DataSource.Factory {
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(15000)
             .setReadTimeoutMs(15000)

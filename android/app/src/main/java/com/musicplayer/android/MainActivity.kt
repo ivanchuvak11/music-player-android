@@ -129,8 +129,6 @@ fun PlayerCoreScreen() {
 
     val localTracks by viewModel.localTracks.collectAsState()
     val trendingOnlineTracks by viewModel.trendingOnlineTracks.collectAsState()
-    val searchedAudius by viewModel.searchedAudiusTracks.collectAsState()
-    val searchedJamendo by viewModel.searchedJamendoTracks.collectAsState()
     val searchedYouTube by viewModel.searchedYouTubeTracks.collectAsState()
     val searchedSoundCloud by viewModel.searchedSoundCloudTracks.collectAsState()
     val cachedTracks by viewModel.searchedCachedTracks.collectAsState()
@@ -196,8 +194,6 @@ fun PlayerCoreScreen() {
             if (isOnline) {
                 viewModel.searchYouTube(q)
                 viewModel.searchSoundCloud(q)
-                viewModel.searchJamendo(q)
-                viewModel.searchAudius(q)
                 viewModel.searchAllSources(q)
             } else {
                 viewModel.searchCachedTracks(q)
@@ -205,8 +201,6 @@ fun PlayerCoreScreen() {
         } else {
             viewModel.searchYouTube("")
             viewModel.searchSoundCloud("")
-            viewModel.searchJamendo("")
-            viewModel.searchAudius("")
         }
     }
 
@@ -295,7 +289,7 @@ fun PlayerCoreScreen() {
                 // Search Results (memoized to avoid re-filtering on scroll)
                 val q = unifiedSearchQuery.trim()
                 val (filteredLocal, filteredCached, onlineResults) = remember(
-                    q, localTracks, cachedTracks, searchedYouTube, searchedSoundCloud, searchedJamendo, searchedAudius
+                    q, localTracks, cachedTracks, searchedYouTube, searchedSoundCloud
                 ) {
                     val loc = localTracks
                         .filter { it.calculateSearchRelevanceScore(q) >= 0 }
@@ -304,9 +298,7 @@ fun PlayerCoreScreen() {
                         .filter { it.toAudioTrack().calculateSearchRelevanceScore(q) >= 0 }
                         .sortedByDescending { it.toAudioTrack().calculateSearchRelevanceScore(q) }
                     val rawOnline = searchedYouTube.map { AudioTrack.fromYouTube(it, viewModel.getBaseUrl()) } +
-                        searchedSoundCloud.map { AudioTrack.fromSoundCloud(it, viewModel.getBaseUrl()) } +
-                        searchedJamendo.map { AudioTrack.fromJamendo(it, viewModel.getBaseUrl()) } +
-                        searchedAudius.map { AudioTrack.fromAudius(it, viewModel.getBaseUrl()) }
+                        searchedSoundCloud.map { AudioTrack.fromSoundCloud(it, viewModel.getBaseUrl()) }
                     val onl = rawOnline
                         .filter { it.calculateSearchRelevanceScore(q) >= 0 }
                         .distinctBy { "${it.title.trim().lowercase()}_${it.artist.trim().lowercase()}" }
@@ -1298,8 +1290,6 @@ fun PlayerCoreScreen() {
                                 unifiedSearchQuery = ""
                                 viewModel.searchYouTube("")
                                 viewModel.searchSoundCloud("")
-                                viewModel.searchJamendo("")
-                                viewModel.searchAudius("")
                             }) {
                                 Icon(
                                     imageVector = Icons.Rounded.Close,
