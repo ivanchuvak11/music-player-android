@@ -243,6 +243,15 @@ class MainPlayerViewModel(
     private var suggestionJob: Job? = null
     // ──────────────────────────────────────────────────────────────────────────
 
+    // ─── Autoplay (Smart Queue Extension) ─────────────────────────────────────
+    private val _autoplayEnabled = MutableStateFlow(sessionManager.getAutoplayEnabled())
+    val autoplayEnabled: StateFlow<Boolean> = _autoplayEnabled.asStateFlow()
+
+    private val _isLoadingAutoplay = MutableStateFlow(false)
+    val isLoadingAutoplay: StateFlow<Boolean> = _isLoadingAutoplay.asStateFlow()
+
+    private var autoplayJob: Job? = null
+    // ──────────────────────────────────────────────────────────────────────────
 
     init {
         // Wire automatic 401 Unauthorized handling
@@ -334,6 +343,36 @@ class MainPlayerViewModel(
                 }
             }
         }
+
+        // ─── Autoplay Observer: extend queue when last track finishes ─────────
+        // Fires when:
+        //   • Autoplay is ON
+        //   • Repeat mode is OFF (repeat-all/one loops by itself, no need to extend)
+        //   • hasNext == false (we are at the end of the queue)
+        //   • The track is playing (not just paused at end)
+        //   • The track is NOT a radio live stream
+        var lastAutoplayTriggeredForTrackId: String? = null
+        viewModelScope.launch {
+            playerController.playbackState.collect { state ->
+                val track = state.currentTrack ?: return@collect
+                val repeatOff = state.repeatMode == PlaybackState.REPEAT_MODE_OFF
+                val autoplayOn = _autoplayEnabled.value
+                val isNearEnd = state.durationMs > 0L &&
+                    state.currentPositionMs >= (state.durationMs - 8_000L)
+
+                // Trigger fetch 8 seconds before the last track ends (like Spotify/YT Music)
+                if (autoplayOn && repeatOff && !state.hasNext &&
+                    !track.isLiveStream && !track.isLocal &&
+                    state.isPlaying && isNearEnd &&
+                    track.id != lastAutoplayTriggeredForTrackId &&
+                    autoplayJob?.isActive != true
+                ) {
+                    lastAutoplayTriggeredForTrackId = track.id
+                    triggerAutoplay(track, state.queue)
+                }
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
     }
 
     private fun handleSessionExpired() {
@@ -366,6 +405,54 @@ class MainPlayerViewModel(
             }
         }
     }
+
+    // ─── Autoplay: extend queue with similar tracks ───────────────────────────
+
+    /**
+     * Fetches similar tracks and appends them to the current queue.
+     * Called automatically when the last track in the queue is 8 seconds from ending.
+     */
+    private fun triggerAutoplay(currentTrack: AudioTrack, currentQueue: List<AudioTrack>) {
+        autoplayJob?.cancel()
+        autoplayJob = viewModelScope.launch {
+            _isLoadingAutoplay.value = true
+            try {
+                val existingIds = currentQueue.map { it.id }.toSet()
+                val similar = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
+                    currentTrack = currentTrack,
+                    existingIds = existingIds,
+                    limit = 12
+                )
+                if (similar.isNotEmpty()) {
+                    similar.forEach { track -> playerController.addToQueue(track) }
+                    android.util.Log.i("Autoplay", "Added ${similar.size} similar tracks to queue")
+                } else {
+                    android.util.Log.w("Autoplay", "No similar tracks found for ${currentTrack.title}")
+                }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("Autoplay", "Failed to fetch autoplay tracks: ${e.message}")
+                }
+            } finally {
+                _isLoadingAutoplay.value = false
+            }
+        }
+    }
+
+    /** Toggle the Autoplay setting and persist it. */
+    fun toggleAutoplay() {
+        val next = !_autoplayEnabled.value
+        _autoplayEnabled.value = next
+        sessionManager.saveAutoplayEnabled(next)
+    }
+
+    /** Set Autoplay explicitly and persist it. */
+    fun setAutoplayEnabled(enabled: Boolean) {
+        _autoplayEnabled.value = enabled
+        sessionManager.saveAutoplayEnabled(enabled)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Player Actions
     fun play() {

@@ -145,6 +145,8 @@ fun PlayerCoreScreen() {
     val localFavorites by viewModel.localFavorites.collectAsState()
     val playHistory by viewModel.playHistory.collectAsState()
     val localPlaylists by viewModel.localPlaylists.collectAsState()
+    val autoplayEnabled by viewModel.autoplayEnabled.collectAsState()
+    val isLoadingAutoplay by viewModel.isLoadingAutoplay.collectAsState()
 
     // Navigation and Dialog States
     var currentTab by remember { mutableStateOf(NavigationTab.HOME) }
@@ -1252,6 +1254,71 @@ fun PlayerCoreScreen() {
                                                 color = DarkRefTheme.TextPrimary,
                                                 fontWeight = FontWeight.SemiBold,
                                                 fontSize = 13.sp
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Autoplay toggle card
+                            item {
+                                Surface(
+                                    onClick = { viewModel.toggleAutoplay() },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = DarkRefTheme.SurfaceCardElevated,
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (autoplayEnabled) DarkRefTheme.AccentMint.copy(alpha = 0.5f)
+                                        else Color.White.copy(alpha = 0.08f)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
+                                            contentDescription = null,
+                                            tint = if (autoplayEnabled) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "Автопрогравання схожих треків",
+                                                color = DarkRefTheme.TextPrimary,
+                                                fontWeight = FontWeight.SemiBold,
+                                                fontSize = 14.sp
+                                            )
+                                            Text(
+                                                text = if (autoplayEnabled)
+                                                    "Увімкнено — коли черга закінчиться, грають схожі пісні"
+                                                else
+                                                    "Вимкнено — плеєр зупиниться після останньої пісні",
+                                                color = DarkRefTheme.TextSecondary,
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        if (isLoadingAutoplay) {
+                                            androidx.compose.material3.CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp,
+                                                color = DarkRefTheme.AccentMint
+                                            )
+                                        } else {
+                                            androidx.compose.material3.Switch(
+                                                checked = autoplayEnabled,
+                                                onCheckedChange = { viewModel.setAutoplayEnabled(it) },
+                                                colors = androidx.compose.material3.SwitchDefaults.colors(
+                                                    checkedThumbColor = Color.White,
+                                                    checkedTrackColor = DarkRefTheme.AccentMint,
+                                                    uncheckedThumbColor = DarkRefTheme.TextSecondary,
+                                                    uncheckedTrackColor = DarkRefTheme.SurfaceCard
+                                                )
                                             )
                                         }
                                     }

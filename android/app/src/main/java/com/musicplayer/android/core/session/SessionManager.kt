@@ -35,6 +35,7 @@ class SessionManager(context: Context) {
         private const val KEY_BASE_URL = "key_base_url"
         private const val KEY_SHUFFLE_MODE = "key_shuffle_mode"
         private const val KEY_REPEAT_MODE = "key_repeat_mode"
+        private const val KEY_AUTOPLAY_ENABLED = "key_autoplay_enabled"
 
         // Equalizer persistence keys
         private const val KEY_EQ_ENABLED = "key_eq_enabled"
@@ -204,6 +205,14 @@ class SessionManager(context: Context) {
 
     fun saveRepeatMode(repeatMode: Int) {
         prefs.edit().putInt(KEY_REPEAT_MODE, repeatMode).apply()
+    }
+
+    fun getAutoplayEnabled(): Boolean {
+        return prefs.getBoolean(KEY_AUTOPLAY_ENABLED, true)
+    }
+
+    fun saveAutoplayEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTOPLAY_ENABLED, enabled).apply()
     }
 
     // Equalizer State Persistence

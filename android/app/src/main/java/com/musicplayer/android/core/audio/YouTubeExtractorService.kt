@@ -177,6 +177,58 @@ object YouTubeExtractorService {
     }
 
     /**
+     * Fetches related / similar tracks for a given YouTube video ID.
+     * Used by AutoplayService to extend the queue when it reaches the last track.
+     *
+     * Returns up to [limit] tracks ordered by their position in YouTube's sidebar
+     * (top = most relevant) with podcasts and junk clips filtered out.
+     */
+    suspend fun getRelatedTracks(videoId: String, limit: Int = 15): List<YouTubeTrackDto> = withContext(Dispatchers.IO) {
+        if (videoId.isBlank()) return@withContext emptyList()
+        init()
+        val cleanId = videoId.trim().removePrefix("youtube_")
+        try {
+            val videoUrl = "https://www.youtube.com/watch?v=$cleanId"
+            val streamInfo = StreamInfo.getInfo(ServiceList.YouTube, videoUrl)
+            val related = streamInfo.relatedItems ?: return@withContext emptyList()
+            val service = ServiceList.YouTube
+            val results = mutableListOf<YouTubeTrackDto>()
+            val seenIds = mutableSetOf<String>()
+            for (item in related) {
+                if (item !is StreamInfoItem) continue
+                val durationSec = item.duration
+                if (durationSec > 1200L || (durationSec > 0 && durationSec < 15L)) continue
+                val id = try {
+                    service.streamLHFactory.getId(item.url)
+                } catch (e: Exception) {
+                    item.url.substringAfter("v=").substringBefore("&")
+                }
+                if (id.isBlank() || !seenIds.add(id)) continue
+                val thumbnail = item.thumbnails.maxByOrNull { it.width * it.height }?.url
+                    ?: item.thumbnails.firstOrNull()?.url
+                results.add(
+                    YouTubeTrackDto(
+                        source = "youtube",
+                        externalId = id,
+                        title = item.name,
+                        artist = item.uploaderName.orEmpty().ifBlank { "YouTube" },
+                        artworkUrl = thumbnail,
+                        durationMs = if (durationSec > 0) durationSec * 1000L else null,
+                        youTubeUrl = item.url,
+                        streamUrl = null
+                    )
+                )
+                if (results.size >= limit) break
+            }
+            Log.d(TAG, "Related tracks for videoId=$cleanId: ${results.size} found")
+            results
+        } catch (e: Exception) {
+            Log.e(TAG, "getRelatedTracks failed for videoId=$cleanId: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
      * Extracts YouTube video ID from a playback URI if applicable.
      */
     fun extractVideoIdFromUri(uri: Uri): String? {
