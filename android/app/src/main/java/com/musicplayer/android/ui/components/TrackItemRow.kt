@@ -32,6 +32,7 @@ fun TrackItemRow(
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
     isFavorite: Boolean = false,
+    isCurrentTrack: Boolean = false,
     isPlayingThisTrack: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
     onToggleSelect: (() -> Unit)? = null,
@@ -40,13 +41,13 @@ fun TrackItemRow(
     onTrackCardClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val isRowActive = isSelected || isCurrentTrack || isPlayingThisTrack
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(
-                if (isSelected) DarkRefTheme.SurfaceCardElevated
-                else if (isPlayingThisTrack) DarkRefTheme.SurfaceCardElevated
+                if (isRowActive) DarkRefTheme.SurfaceCardElevated
                 else DarkRefTheme.SurfaceCard
             )
             .clickable {
@@ -88,9 +89,9 @@ fun TrackItemRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = track.title,
-                fontWeight = if (isPlayingThisTrack) FontWeight.Bold else FontWeight.Medium,
+                fontWeight = if (isCurrentTrack || isPlayingThisTrack) FontWeight.Bold else FontWeight.Medium,
                 fontSize = 14.sp,
-                color = if (isPlayingThisTrack) Color.White else DarkRefTheme.TextPrimary,
+                color = if (isPlayingThisTrack) DarkRefTheme.AccentMint else if (isCurrentTrack) Color.White else DarkRefTheme.TextPrimary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -167,14 +168,18 @@ fun TrackItemRow(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(CircleShape)
-                    .background(if (isPlayingThisTrack) DarkRefTheme.AccentMint.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.12f))
+                    .background(
+                        if (isPlayingThisTrack) DarkRefTheme.AccentMint.copy(alpha = 0.25f)
+                        else if (isCurrentTrack) DarkRefTheme.AccentMint.copy(alpha = 0.15f)
+                        else Color.White.copy(alpha = 0.12f)
+                    )
                     .clickable { onPlay() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = if (isPlayingThisTrack) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                     contentDescription = if (isPlayingThisTrack) "Pause" else "Play",
-                    tint = if (isPlayingThisTrack) DarkRefTheme.AccentMint else Color.White,
+                    tint = if (isPlayingThisTrack || isCurrentTrack) DarkRefTheme.AccentMint else Color.White,
                     modifier = Modifier.size(18.dp)
                 )
             }
