@@ -93,10 +93,12 @@ fun NowPlayingSheet(
     }
     val activeTrackIndex = currentQueue.indexOfFirst { it.id == activeTrack.id }.coerceAtLeast(0)
 
-    val pagerState = rememberPagerState(
-        initialPage = activeTrackIndex,
-        pageCount = { currentQueue.size }
-    )
+    val pagerState = key(currentQueue) {
+        rememberPagerState(
+            initialPage = activeTrackIndex.coerceIn(0, (currentQueue.size - 1).coerceAtLeast(0)),
+            pageCount = { currentQueue.size }
+        )
+    }
 
     val density = LocalDensity.current
     val isShuffle = playbackState.shuffleModeEnabled
@@ -362,6 +364,7 @@ fun NowPlayingSheet(
                     } else {
                         HorizontalPager(
                             state = pagerState,
+                            key = { page -> currentQueue.getOrNull(page)?.id ?: page.toString() },
                             pageSize = PageSize.Fixed(cardSize),
                             contentPadding = PaddingValues(horizontal = horizontalPadding),
                             pageSpacing = 16.dp,
@@ -370,7 +373,7 @@ fun NowPlayingSheet(
                                 .fillMaxWidth()
                                 .height(cardSize + 28.dp)
                         ) { page ->
-                            val track = currentQueue[page]
+                            val track = currentQueue.getOrNull(page) ?: return@HorizontalPager
                             val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue
                             val scale = lerp(0.85f, 1f, (1f - pageOffset).coerceIn(0f, 1f))
 
