@@ -18,10 +18,15 @@ class SessionManager(context: Context) {
     private val isEncrypted: Boolean
     private val prefs: SharedPreferences
 
+    // In-memory token cache: avoids repetitive AES-256 decryption calls through Android Keystore JNI
+    @Volatile
+    private var cachedToken: String? = null
+
     init {
         val (p, encrypted) = createPrefs(appContext)
         prefs = p
         isEncrypted = encrypted
+        cachedToken = if (isEncrypted) prefs.getString(KEY_AUTH_TOKEN, null) else null
     }
 
     companion object {
@@ -35,6 +40,7 @@ class SessionManager(context: Context) {
         private const val KEY_BASE_URL = "key_base_url"
         private const val KEY_SHUFFLE_MODE = "key_shuffle_mode"
         private const val KEY_REPEAT_MODE = "key_repeat_mode"
+        private const val KEY_AUTOPLAY_ENABLED = "key_autoplay_enabled"
 
         // Equalizer persistence keys
         private const val KEY_EQ_ENABLED = "key_eq_enabled"
@@ -114,6 +120,7 @@ class SessionManager(context: Context) {
             Log.e(TAG, "Cannot save auth token: Hardware encryption is unavailable.")
             return
         }
+        cachedToken = token
         prefs.edit().apply {
             putString(KEY_AUTH_TOKEN, token)
             if (userId != null) putInt(KEY_USER_ID, userId) else remove(KEY_USER_ID)
@@ -125,7 +132,7 @@ class SessionManager(context: Context) {
 
     fun getToken(): String? {
         if (!isEncrypted) return null
-        return prefs.getString(KEY_AUTH_TOKEN, null)
+        return cachedToken ?: prefs.getString(KEY_AUTH_TOKEN, null)?.also { cachedToken = it }
     }
 
     fun getUserId(): Int? {
@@ -145,6 +152,7 @@ class SessionManager(context: Context) {
     }
 
     fun clearSession() {
+        cachedToken = null
         prefs.edit().apply {
             remove(KEY_AUTH_TOKEN)
             remove(KEY_USER_ID)
@@ -204,6 +212,14 @@ class SessionManager(context: Context) {
 
     fun saveRepeatMode(repeatMode: Int) {
         prefs.edit().putInt(KEY_REPEAT_MODE, repeatMode).apply()
+    }
+
+    fun getAutoplayEnabled(): Boolean {
+        return prefs.getBoolean(KEY_AUTOPLAY_ENABLED, true)
+    }
+
+    fun saveAutoplayEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTOPLAY_ENABLED, enabled).apply()
     }
 
     // Equalizer State Persistence

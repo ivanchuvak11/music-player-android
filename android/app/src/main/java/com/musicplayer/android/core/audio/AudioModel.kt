@@ -29,6 +29,17 @@ data class AudioTrack(
     val isLiveStream: Boolean = false
 ) {
     fun toMediaItem(): MediaItem {
+        val effectiveUriString = if (id.startsWith("youtube_") || audioUrl.contains("youtube.com") || audioUrl.contains("youtu.be")) {
+            val videoId = try {
+                YouTubeExtractorService.extractVideoIdFromUri(Uri.parse(audioUrl)) ?: id.removePrefix("youtube_")
+            } catch (e: Exception) {
+                id.removePrefix("youtube_")
+            }
+            YouTubeExtractorService.getCachedStreamUrl(videoId) ?: audioUrl
+        } else {
+            audioUrl
+        }
+
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
             .setArtist(artist)
@@ -38,7 +49,7 @@ data class AudioTrack(
 
         return MediaItem.Builder()
             .setMediaId(id)
-            .setUri(audioUrl)
+            .setUri(effectiveUriString)
             .setMediaMetadata(metadata)
             .build()
     }
@@ -194,6 +205,9 @@ fun CachedTrackEntity.toAudioTrack(): AudioTrack = AudioTrack(
     isLocal = localFilePath != null,
     isLiveStream = false
 )
+
+fun com.musicplayer.android.core.network.YouTubeTrackDto.toAudioTrack(backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack =
+    AudioTrack.fromYouTube(this, backendBaseUrl)
 
 /**
  * Current playback state observed by UI components.
@@ -581,5 +595,20 @@ private fun isAdjacentTransposition(first: String, second: String): Boolean {
         mismatches[1] == mismatches[0] + 1 &&
         first[mismatches[0]] == second[mismatches[1]] &&
         first[mismatches[1]] == second[mismatches[0]]
+}
+
+/**
+ * Robust track ID comparison that normalizes prefixes (such as "youtube_", "jamendo_", etc.)
+ * so tracks match seamlessly between ExoPlayer media items, view models, and UI components.
+ */
+fun areTrackIdsEqual(id1: String?, id2: String?): Boolean {
+    if (id1 == null || id2 == null) return false
+    if (id1 == id2) return true
+    val clean1 = id1.trim().removePrefix("youtube_")
+    val clean2 = id2.trim().removePrefix("youtube_")
+    if (clean1 == clean2) return true
+    val stripped1 = clean1.removePrefix("jamendo_").removePrefix("audius_").removePrefix("soundcloud_").removePrefix("radio_")
+    val stripped2 = clean2.removePrefix("jamendo_").removePrefix("audius_").removePrefix("soundcloud_").removePrefix("radio_")
+    return stripped1.isNotEmpty() && stripped1 == stripped2
 }
 

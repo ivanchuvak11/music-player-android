@@ -11,6 +11,7 @@ import com.musicplayer.android.core.audio.LocalAudioScanner
 import com.musicplayer.android.core.audio.PlaybackState
 import com.musicplayer.android.core.audio.PlayerController
 import com.musicplayer.android.core.audio.PlayerControllerImpl
+import com.musicplayer.android.core.audio.areTrackIdsEqual
 import com.musicplayer.android.core.audio.mergeYouTubeSearchResults
 import com.musicplayer.android.core.audio.shouldSupplementYouTubeSearch
 import com.musicplayer.android.core.audio.toAudioTrack
@@ -56,6 +57,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,20 +83,20 @@ class MainPlayerViewModel(
     application: Application,
     private val playerController: PlayerController = PlayerControllerImpl(application),
     private var apiService: MusicApiService = NetworkClient.createService(
-        baseUrl = SessionManager(application).getBaseUrl(),
+        baseUrl = SessionManager.getInstance(application).getBaseUrl(),
         context = application
     ),
-    private val sessionManager: SessionManager = SessionManager(application)
+    private val sessionManager: SessionManager = SessionManager.getInstance(application)
 ) : AndroidViewModel(application) {
 
     constructor(application: Application) : this(
         application,
         PlayerControllerImpl(application),
         NetworkClient.createService(
-            baseUrl = SessionManager(application).getBaseUrl(),
+            baseUrl = SessionManager.getInstance(application).getBaseUrl(),
             context = application
         ),
-        SessionManager(application)
+        SessionManager.getInstance(application)
     )
 
     private val db = AppDatabase.getDatabase(application)
@@ -243,6 +245,34 @@ class MainPlayerViewModel(
     private var suggestionJob: Job? = null
     // ──────────────────────────────────────────────────────────────────────────
 
+    // ─── Autoplay (Smart Queue Extension) ─────────────────────────────────────
+    private val _autoplayEnabled = MutableStateFlow(sessionManager.getAutoplayEnabled())
+    val autoplayEnabled: StateFlow<Boolean> = _autoplayEnabled.asStateFlow()
+
+    private val _isLoadingAutoplay = MutableStateFlow(false)
+    val isLoadingAutoplay: StateFlow<Boolean> = _isLoadingAutoplay.asStateFlow()
+
+    private var autoplayJob: Job? = null
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // ─── Categories, Curated Playlists & Artists (Core Architecture) ──────────
+    val musicGenres: List<com.musicplayer.android.core.audio.MusicGenre> =
+        com.musicplayer.android.core.audio.CuratedMusicRepository.predefinedGenres
+
+    private val _curatedPlaylists = MutableStateFlow<List<com.musicplayer.android.core.audio.CuratedPlaylist>>(
+        com.musicplayer.android.core.audio.CuratedMusicRepository.predefinedPlaylists
+    )
+    val curatedPlaylists: StateFlow<List<com.musicplayer.android.core.audio.CuratedPlaylist>> = _curatedPlaylists.asStateFlow()
+
+    val artists: StateFlow<List<com.musicplayer.android.core.audio.ArtistInfo>> = _localTracks
+        .map { tracks ->
+            com.musicplayer.android.core.audio.CuratedMusicRepository.extractArtists(tracks)
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    private val _curatedTracksLoading = MutableStateFlow(false)
+    val curatedTracksLoading: StateFlow<Boolean> = _curatedTracksLoading.asStateFlow()
+    // ──────────────────────────────────────────────────────────────────────────
 
     init {
         // Wire automatic 401 Unauthorized handling
@@ -334,6 +364,38 @@ class MainPlayerViewModel(
                 }
             }
         }
+
+        // ─── Autoplay Observer: extend queue when last track finishes ─────────
+        // Fires when:
+        //   • Autoplay is ON
+        //   • Repeat mode is OFF (repeat-all/one loops by itself, no need to extend)
+        //   • hasNext == false (we are at the end of the queue)
+        //   • The track is playing (not just paused at end)
+        //   • The track is NOT a radio live stream
+        var lastAutoplayTriggeredForTrackId: String? = null
+        viewModelScope.launch {
+            playerController.playbackState.collect { state ->
+                val track = state.currentTrack ?: return@collect
+                val repeatOff = state.repeatMode == PlaybackState.REPEAT_MODE_OFF
+                val autoplayOn = _autoplayEnabled.value
+                val isNearEnd = (state.durationMs > 0L && state.currentPositionMs >= (state.durationMs - 20_000L)) ||
+                    (state.durationMs <= 0L && state.currentPositionMs >= 25_000L)
+
+                // Trigger fetch 20 seconds before the last track ends for gapless Spotify-like continuation,
+                // or if it already reached the end (currentPositionMs near durationMs or ended).
+                val isAtEnd = (state.durationMs > 0L && state.currentPositionMs >= (state.durationMs - 2_000L))
+                if (autoplayOn && repeatOff && !state.hasNext &&
+                    !track.isLiveStream &&
+                    (state.isPlaying || isAtEnd) && (isNearEnd || isAtEnd) &&
+                    track.id != lastAutoplayTriggeredForTrackId &&
+                    autoplayJob?.isActive != true
+                ) {
+                    lastAutoplayTriggeredForTrackId = track.id
+                    triggerAutoplay(track, state.queue)
+                }
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
     }
 
     private fun handleSessionExpired() {
@@ -366,6 +428,187 @@ class MainPlayerViewModel(
             }
         }
     }
+
+    // ─── Autoplay: extend queue with similar tracks ───────────────────────────
+
+    /**
+     * Fetches similar tracks and appends them to the current queue.
+     * Called automatically when the last track in the queue is 8 seconds from ending.
+     */
+    private fun triggerAutoplay(currentTrack: AudioTrack, currentQueue: List<AudioTrack>) {
+        autoplayJob?.cancel()
+        autoplayJob = viewModelScope.launch {
+            _isLoadingAutoplay.value = true
+            try {
+                val existingIds = currentQueue.map { it.id }.toSet()
+                val similar = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
+                    currentTrack = currentTrack,
+                    existingIds = existingIds,
+                    limit = 12
+                )
+                if (similar.isNotEmpty()) {
+                    similar.forEach { track -> playerController.addToQueue(track) }
+                    android.util.Log.i("Autoplay", "Added ${similar.size} similar tracks to queue")
+                    val upcomingIds = similar.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
+                    // If player is ended or reached the end while fetching, advance to the new track
+                    val state = playbackState.value
+                    if (!state.isPlaying && (state.currentPositionMs >= (currentTrack.durationMs - 1500L).coerceAtLeast(0L) || currentTrack.durationMs <= 0L)) {
+                        delay(200)
+                        playerController.playNext()
+                    }
+                } else {
+                    android.util.Log.w("Autoplay", "No similar tracks found for ${currentTrack.title}")
+                }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("Autoplay", "Failed to fetch autoplay tracks: ${e.message}")
+                }
+            } finally {
+                _isLoadingAutoplay.value = false
+            }
+        }
+    }
+
+    /**
+     * Triggered when the user explicitly taps "Next" on the last song in the queue.
+     * Fetches similar tracks, appends them to the queue, and immediately advances playback.
+     */
+    fun playNextWithAutoplay(currentTrack: AudioTrack, currentQueue: List<AudioTrack>) {
+        if (currentTrack.isLiveStream) return
+        autoplayJob?.cancel()
+        autoplayJob = viewModelScope.launch {
+            _isLoadingAutoplay.value = true
+            try {
+                val existingIds = currentQueue.map { it.id }.toSet()
+                val similar = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
+                    currentTrack = currentTrack,
+                    existingIds = existingIds,
+                    limit = 15
+                )
+                if (similar.isNotEmpty()) {
+                    similar.forEach { track -> playerController.addToQueue(track) }
+                    android.util.Log.i("Autoplay", "Explicit Next: appended ${similar.size} similar tracks")
+                    val upcomingIds = similar.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
+                    delay(200)
+                    playerController.playNext()
+                } else if (currentQueue.size > 1) {
+                    // Loop to start if no similar tracks found
+                    playerController.setQueue(currentQueue, startIndex = 0, autoPlay = true)
+                }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("Autoplay", "Failed to fetch autoplay on Next: ${e.message}")
+                }
+            } finally {
+                _isLoadingAutoplay.value = false
+            }
+        }
+    }
+
+    // ─── Similar Tracks for Any Song (Song Radio / Схожі треки) ────────────────
+    private val _similarTracks = MutableStateFlow<List<AudioTrack>>(emptyList())
+    val similarTracks: StateFlow<List<AudioTrack>> = _similarTracks.asStateFlow()
+
+    private val _isLoadingSimilarTracks = MutableStateFlow(false)
+    val isLoadingSimilarTracks: StateFlow<Boolean> = _isLoadingSimilarTracks.asStateFlow()
+
+    private val _selectedSimilarSeedTrack = MutableStateFlow<AudioTrack?>(null)
+    val selectedSimilarSeedTrack: StateFlow<AudioTrack?> = _selectedSimilarSeedTrack.asStateFlow()
+
+    private var similarTracksJob: Job? = null
+
+    /**
+     * Loads a list of similar tracks for the given seed track to display in UI.
+     */
+    fun loadSimilarTracks(seedTrack: AudioTrack) {
+        if (_selectedSimilarSeedTrack.value?.id == seedTrack.id && _similarTracks.value.isNotEmpty()) {
+            return
+        }
+        _selectedSimilarSeedTrack.value = seedTrack
+        _similarTracks.value = emptyList()
+        similarTracksJob?.cancel()
+        similarTracksJob = viewModelScope.launch {
+            _isLoadingSimilarTracks.value = true
+            try {
+                val results = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
+                    currentTrack = seedTrack,
+                    existingIds = setOf(seedTrack.id),
+                    limit = 20
+                )
+                _similarTracks.value = results
+                val upcomingIds = results.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("Autoplay", "Failed to load similar tracks: ${e.message}")
+                }
+            } finally {
+                _isLoadingSimilarTracks.value = false
+            }
+        }
+    }
+
+    /**
+     * Creates an instant radio queue based on the seed track (seed + 20 similar songs)
+     * and starts playback immediately.
+     */
+    fun playSimilarTracks(seedTrack: AudioTrack) {
+        viewModelScope.launch {
+            _isLoadingSimilarTracks.value = true
+            try {
+                val results = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
+                    currentTrack = seedTrack,
+                    existingIds = setOf(seedTrack.id),
+                    limit = 20
+                )
+                if (results.isNotEmpty()) {
+                    val fullQueue = listOf(seedTrack) + results
+                    playQueue(fullQueue, startIndex = 0)
+                } else {
+                    playTrack(seedTrack)
+                }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("Autoplay", "Failed to play similar mix: ${e.message}")
+                }
+                playTrack(seedTrack)
+            } finally {
+                _isLoadingSimilarTracks.value = false
+            }
+        }
+    }
+
+    /**
+     * Appends all currently loaded similar tracks to the current playback queue.
+     */
+    fun addLoadedSimilarTracksToQueue() {
+        val tracks = _similarTracks.value
+        if (tracks.isNotEmpty()) {
+            tracks.forEach { playerController.addToQueue(it) }
+        }
+    }
+
+    fun clearSimilarTracks() {
+        _selectedSimilarSeedTrack.value = null
+        _similarTracks.value = emptyList()
+    }
+
+    /** Toggle the Autoplay setting and persist it. */
+    fun toggleAutoplay() {
+        val next = !_autoplayEnabled.value
+        _autoplayEnabled.value = next
+        sessionManager.saveAutoplayEnabled(next)
+    }
+
+    /** Set Autoplay explicitly and persist it. */
+    fun setAutoplayEnabled(enabled: Boolean) {
+        _autoplayEnabled.value = enabled
+        sessionManager.saveAutoplayEnabled(enabled)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Player Actions
     fun play() {
@@ -410,6 +653,18 @@ class MainPlayerViewModel(
                 val currentIndex = stations.indexOfFirst { it.name == current.title }
                 val nextIndex = if (currentIndex >= 0) (currentIndex + 1) % stations.size else 0
                 playRadioStation(stations[nextIndex])
+                return
+            }
+        }
+        val state = playbackState.value
+        // When user taps "Next" on the last song in queue, trigger instant Autoplay extension
+        if (!state.hasNext) {
+            if (state.repeatMode == PlaybackState.REPEAT_MODE_ALL && state.queue.isNotEmpty()) {
+                playerController.setQueue(state.queue, startIndex = 0, autoPlay = true)
+                return
+            }
+            if (current != null && !current.isLiveStream) {
+                playNextWithAutoplay(current, state.queue)
                 return
             }
         }
@@ -481,10 +736,20 @@ class MainPlayerViewModel(
     fun getBaseUrl(): String = sessionManager.getBaseUrl()
 
     fun playTrack(track: AudioTrack) {
+        val currentTrack = playbackState.value.currentTrack
+        if (currentTrack != null && areTrackIdsEqual(track.id, currentTrack.id)) {
+            if (playbackState.value.isPlaying) {
+                pause()
+            } else {
+                play()
+            }
+            return
+        }
+
         // If the track belongs to local favorites and current queue doesn't contain it, play the favorites queue
         val favs = localFavorites.value
-        val favIndex = favs.indexOfFirst { it.id == track.id }
-        if (favIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { it.id == track.id })) {
+        val favIndex = favs.indexOfFirst { areTrackIdsEqual(it.id, track.id) }
+        if (favIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { areTrackIdsEqual(it.id, track.id) })) {
             val favTracks = favs.map { it.toAudioTrack() }
             playQueue(favTracks, favIndex)
             return
@@ -492,8 +757,8 @@ class MainPlayerViewModel(
 
         // If the track is among local tracks and queue is empty, play local tracks queue
         val locals = _localTracks.value
-        val localIndex = locals.indexOfFirst { it.id == track.id }
-        if (localIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { it.id == track.id })) {
+        val localIndex = locals.indexOfFirst { areTrackIdsEqual(it.id, track.id) }
+        if (localIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { areTrackIdsEqual(it.id, track.id) })) {
             playQueue(locals, localIndex)
             return
         }
@@ -502,9 +767,18 @@ class MainPlayerViewModel(
     }
 
     fun playLocalTrack(track: AudioTrack) {
+        val currentTrack = playbackState.value.currentTrack
+        if (currentTrack != null && areTrackIdsEqual(track.id, currentTrack.id)) {
+            if (playbackState.value.isPlaying) {
+                pause()
+            } else {
+                play()
+            }
+            return
+        }
         val tracks = _localTracks.value
         if (tracks.isNotEmpty()) {
-            val index = tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+            val index = tracks.indexOfFirst { areTrackIdsEqual(it.id, track.id) }.coerceAtLeast(0)
             playQueue(tracks, index)
         } else {
             playTrack(track)
@@ -512,6 +786,16 @@ class MainPlayerViewModel(
     }
 
     fun playQueue(tracks: List<AudioTrack>, startIndex: Int = 0) {
+        val targetTrack = tracks.getOrNull(startIndex)
+        val currentTrack = playbackState.value.currentTrack
+        if (targetTrack != null && currentTrack != null && areTrackIdsEqual(targetTrack.id, currentTrack.id)) {
+            if (playbackState.value.isPlaying) {
+                pause()
+            } else {
+                play()
+            }
+            return
+        }
         playerController.setQueue(tracks, startIndex, autoPlay = true)
     }
 
@@ -823,6 +1107,8 @@ class MainPlayerViewModel(
 
                 if (tracks.isNotEmpty()) {
                     _trendingOnlineTracks.value = tracks
+                    val upcomingIds = tracks.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -982,6 +1268,8 @@ class MainPlayerViewModel(
             _searchUiResults.value = _searchUiResults.value.copy(
                 onlineResults = onl
             )
+            val upcomingIds = onl.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+            com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
         }
     }
 
@@ -1605,6 +1893,70 @@ class MainPlayerViewModel(
         NetworkClient.authInterceptor.authToken = null
         _currentUser.value = null
         _authStatusMessage.value = "Ви вийшли з акаунту"
+    }
+
+    /**
+     * Plays a curated playlist. If tracks are already populated, starts playback immediately.
+     * Otherwise fetches tracks using YouTube search for the playlist topic and plays them.
+     */
+    fun playCuratedPlaylist(playlist: com.musicplayer.android.core.audio.CuratedPlaylist, startIndex: Int = 0) {
+        viewModelScope.launch {
+            if (playlist.tracks.isNotEmpty()) {
+                playQueue(playlist.tracks, startIndex)
+                return@launch
+            }
+            if (playlist.searchQuery.isNotBlank()) {
+                _curatedTracksLoading.value = true
+                try {
+                    val dtoList = withContext(Dispatchers.IO) {
+                        com.musicplayer.android.core.audio.YouTubeExtractorService.search(playlist.searchQuery, limit = 25)
+                    }
+                    val tracks = dtoList.map { it.toAudioTrack() }
+                    if (tracks.isNotEmpty()) {
+                        // Cache tracks in memory / state
+                        _curatedPlaylists.value = _curatedPlaylists.value.map {
+                            if (it.id == playlist.id) it.copy(tracks = tracks) else it
+                        }
+                        playQueue(tracks, startIndex)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainPlayerViewModel", "Failed to load curated playlist: ${playlist.title}", e)
+                } finally {
+                    _curatedTracksLoading.value = false
+                }
+            }
+        }
+    }
+
+    /**
+     * Plays tracks for a given music genre / mood category.
+     */
+    fun playGenre(genre: com.musicplayer.android.core.audio.MusicGenre) {
+        viewModelScope.launch {
+            _curatedTracksLoading.value = true
+            try {
+                val dtoList = withContext(Dispatchers.IO) {
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.search(genre.searchQuery, limit = 25)
+                }
+                val tracks = dtoList.map { it.toAudioTrack() }
+                if (tracks.isNotEmpty()) {
+                    playQueue(tracks, 0)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainPlayerViewModel", "Failed to load genre tracks: ${genre.name}", e)
+            } finally {
+                _curatedTracksLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * Plays all tracks by a specific artist.
+     */
+    fun playArtistTracks(artist: com.musicplayer.android.core.audio.ArtistInfo, startIndex: Int = 0) {
+        if (artist.tracks.isNotEmpty()) {
+            playQueue(artist.tracks, startIndex)
+        }
     }
 
     override fun onCleared() {

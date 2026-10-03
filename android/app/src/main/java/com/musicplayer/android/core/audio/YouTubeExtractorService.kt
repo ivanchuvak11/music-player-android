@@ -4,6 +4,7 @@ import android.net.Uri
 import android.util.Log
 import com.musicplayer.android.core.network.YouTubeTrackDto
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -21,8 +22,47 @@ object YouTubeExtractorService {
     private const val TAG = "YouTubeExtractor"
     private var isInitialized = false
 
+    private const val MAX_STREAM_CACHE_SIZE = 150
     private data class CachedStream(val url: String, val expiresAt: Long)
     private val streamCache = ConcurrentHashMap<String, CachedStream>()
+
+    private fun putStreamInCache(id: String, stream: CachedStream) {
+        if (streamCache.size >= MAX_STREAM_CACHE_SIZE) {
+            val now = System.currentTimeMillis()
+            // Evict expired entries
+            val iterator = streamCache.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (now >= entry.value.expiresAt) {
+                    iterator.remove()
+                }
+            }
+            // If still over capacity, remove arbitrary excess
+            if (streamCache.size >= MAX_STREAM_CACHE_SIZE) {
+                val excess = streamCache.keys.take(streamCache.size - MAX_STREAM_CACHE_SIZE + 1)
+                excess.forEach { streamCache.remove(it) }
+            }
+        }
+        streamCache[id] = stream
+    }
+
+    // In-memory LRU query caches: 40 entries, 15 min TTL (0ms latency on repeated queries or tab switches)
+    private data class CachedSearchResults(val tracks: List<YouTubeTrackDto>, val timestamp: Long)
+    private const val MAX_SEARCH_CACHE = 40
+    private const val SEARCH_CACHE_TTL_MS = 15 * 60 * 1000L // 15 minutes
+
+    private val searchCacheLock = Any()
+    private val searchCache = object : LinkedHashMap<String, CachedSearchResults>(MAX_SEARCH_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedSearchResults>?): Boolean {
+            return size > MAX_SEARCH_CACHE
+        }
+    }
+
+    private val relatedCache = object : LinkedHashMap<String, CachedSearchResults>(MAX_SEARCH_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedSearchResults>?): Boolean {
+            return size > MAX_SEARCH_CACHE
+        }
+    }
 
     @Synchronized
     fun init() {
@@ -42,6 +82,47 @@ object YouTubeExtractorService {
      */
     suspend fun resolveAudioStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
         resolveAudioStreamUrlSync(videoId)
+    }
+
+    private val prefetchJob = kotlinx.coroutines.SupervisorJob()
+    private val prefetchScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + prefetchJob)
+
+    /**
+     * Pre-resolves audio stream URLs for upcoming tracks in background concurrently.
+     * When user skips or track transitions, playback starts with 0ms delay!
+     */
+    fun prefetchNextTracks(videoIds: List<String>) {
+        if (videoIds.isEmpty()) return
+        prefetchScope.launch {
+            videoIds.take(4).forEach { id ->
+                launch {
+                    val cleanId = id.trim().removePrefix("youtube_")
+                    if (cleanId.isNotBlank()) {
+                        val now = System.currentTimeMillis()
+                        val cached = streamCache[cleanId]
+                        if (cached == null || now >= cached.expiresAt - 300_000L) {
+                            try {
+                                Log.d(TAG, "Prefetching audio stream for track: videoId=$cleanId")
+                                resolveAudioStreamUrlSync(cleanId)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Prefetch failed for $cleanId: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Instantly retrieves cached Google Video CDN stream URL if valid, bypassing extraction latency.
+     */
+    fun getCachedStreamUrl(videoId: String): String? {
+        if (videoId.isBlank()) return null
+        val cleanId = videoId.trim().removePrefix("youtube_")
+        val cached = streamCache[cleanId] ?: return null
+        val now = System.currentTimeMillis()
+        return if (now < cached.expiresAt - 300_000L) cached.url else null
     }
 
     /**
@@ -77,10 +158,13 @@ object YouTubeExtractorService {
             val streamUrl = bestAudio.content
 
             if (!streamUrl.isNullOrBlank()) {
-                // Cache for 2 hours (Google Video CDN URLs are valid for ~6 hours)
-                streamCache[cleanId] = CachedStream(
-                    url = streamUrl,
-                    expiresAt = now + (2 * 3600 * 1000L)
+                // Cache for 2 hours (Google Video CDN URLs are valid for ~6 hours) with LRU bounded capacity
+                putStreamInCache(
+                    cleanId,
+                    CachedStream(
+                        url = streamUrl,
+                        expiresAt = now + (2 * 3600 * 1000L)
+                    )
                 )
                 Log.i(TAG, "Resolved audio stream URL for videoId=$cleanId (bitrate=${bestAudio.bitrate}bps)")
                 streamUrl
@@ -100,6 +184,19 @@ object YouTubeExtractorService {
      */
     suspend fun search(query: String, limit: Int = 20): List<YouTubeTrackDto> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
+        val normalizedQuery = query.trim().lowercase()
+        val cacheKey = "${normalizedQuery}_$limit"
+        val now = System.currentTimeMillis()
+
+        // 0ms instant cache hit on backspace, tab switch, or repeated queries
+        synchronized(searchCacheLock) {
+            val cached = searchCache[cacheKey]
+            if (cached != null && now - cached.timestamp < SEARCH_CACHE_TTL_MS) {
+                Log.d(TAG, "Instant search cache HIT for '$query' (${cached.tracks.size} tracks)")
+                return@withContext cached.tracks
+            }
+        }
+
         init()
 
         return@withContext try {
@@ -168,6 +265,12 @@ object YouTubeExtractorService {
                 }
             }
 
+            if (tracks.isNotEmpty()) {
+                synchronized(searchCacheLock) {
+                    searchCache[cacheKey] = CachedSearchResults(tracks, now)
+                }
+            }
+
             Log.d(TAG, "Search '$query' found ${tracks.size} tracks directly via client extractor")
             tracks
         } catch (e: Exception) {
@@ -177,13 +280,84 @@ object YouTubeExtractorService {
     }
 
     /**
-     * Extracts YouTube video ID from a playback URI if applicable.
+     * Fetches related / similar tracks for a given YouTube video ID.
+     * Used by AutoplayService to extend the queue when it reaches the last track.
+     *
+     * Returns up to [limit] tracks ordered by their position in YouTube's sidebar
+     * (top = most relevant) with podcasts and junk clips filtered out.
      */
-    fun extractVideoIdFromUri(uri: Uri): String? {
-        val uriString = uri.toString()
+    suspend fun getRelatedTracks(videoId: String, limit: Int = 15): List<YouTubeTrackDto> = withContext(Dispatchers.IO) {
+        if (videoId.isBlank()) return@withContext emptyList()
+        val cleanId = videoId.trim().removePrefix("youtube_")
+        val cacheKey = "${cleanId}_$limit"
+        val now = System.currentTimeMillis()
+
+        // 0ms instant cache hit on back-navigation or repeat mix requests
+        synchronized(searchCacheLock) {
+            val cached = relatedCache[cacheKey]
+            if (cached != null && now - cached.timestamp < SEARCH_CACHE_TTL_MS) {
+                Log.d(TAG, "Instant related tracks cache HIT for '$cleanId' (${cached.tracks.size} tracks)")
+                return@withContext cached.tracks
+            }
+        }
+
+        init()
+        try {
+            val videoUrl = "https://www.youtube.com/watch?v=$cleanId"
+            val streamInfo = StreamInfo.getInfo(ServiceList.YouTube, videoUrl)
+            val related = streamInfo.relatedItems ?: return@withContext emptyList()
+            val service = ServiceList.YouTube
+            val results = mutableListOf<YouTubeTrackDto>()
+            val seenIds = mutableSetOf<String>()
+            for (item in related) {
+                if (item !is StreamInfoItem) continue
+                val durationSec = item.duration
+                if (durationSec > 1200L || (durationSec > 0 && durationSec < 15L)) continue
+                val id = try {
+                    service.streamLHFactory.getId(item.url)
+                } catch (e: Exception) {
+                    item.url.substringAfter("v=").substringBefore("&")
+                }
+                if (id.isBlank() || !seenIds.add(id)) continue
+                val thumbnail = item.thumbnails.maxByOrNull { it.width * it.height }?.url
+                    ?: item.thumbnails.firstOrNull()?.url
+                results.add(
+                    YouTubeTrackDto(
+                        source = "youtube",
+                        externalId = id,
+                        title = item.name,
+                        artist = item.uploaderName.orEmpty().ifBlank { "YouTube" },
+                        artworkUrl = thumbnail,
+                        durationMs = if (durationSec > 0) durationSec * 1000L else null,
+                        youTubeUrl = item.url,
+                        streamUrl = null
+                    )
+                )
+                if (results.size >= limit) break
+            }
+
+            if (results.isNotEmpty()) {
+                synchronized(searchCacheLock) {
+                    relatedCache[cacheKey] = CachedSearchResults(results, now)
+                }
+            }
+
+            Log.d(TAG, "Related tracks for videoId=$cleanId: ${results.size} found")
+            results
+        } catch (e: Exception) {
+            Log.e(TAG, "getRelatedTracks failed for videoId=$cleanId: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
+     * Extracts YouTube video ID from a playback URL string if applicable.
+     */
+    fun extractVideoIdFromUrl(uriString: String): String? {
+        if (uriString.isBlank()) return null
 
         // 1. If it's already a direct Google Video CDN URL, don't modify
-        if (uri.host?.contains("googlevideo.com") == true) return null
+        if (uriString.contains("googlevideo.com")) return null
 
         // 2. Backend YouTube stream proxy URL: /api/youtube/tracks/{id}/stream
         if (uriString.contains("/api/youtube/tracks/")) {
@@ -193,8 +367,8 @@ object YouTubeExtractorService {
         }
 
         // 3. YouTube custom scheme: youtube://{id} or youtube_{id}
-        if (uri.scheme.equals("youtube", ignoreCase = true)) {
-            val part = uri.schemeSpecificPart.removePrefix("//")
+        if (uriString.startsWith("youtube://", ignoreCase = true)) {
+            val part = uriString.substringAfter("youtube://")
             val videoId = part.substringBefore("/").substringBefore("?").removePrefix("youtube_")
             if (videoId.isNotBlank()) return videoId
         }
@@ -204,16 +378,23 @@ object YouTubeExtractorService {
         }
 
         // 4. Web URLs: youtube.com/watch?v={id} or youtu.be/{id}
-        if (uri.host?.contains("youtube.com") == true) {
-            val vParam = uri.getQueryParameter("v")
-            if (!vParam.isNullOrBlank()) return vParam
+        if (uriString.contains("youtube.com/watch")) {
+            val vParam = uriString.substringAfter("v=", "").substringBefore("&").substringBefore("#")
+            if (vParam.isNotBlank()) return vParam
         }
-        if (uri.host?.contains("youtu.be") == true) {
-            val segment = uri.lastPathSegment
-            if (!segment.isNullOrBlank()) return segment
+        if (uriString.contains("youtu.be/")) {
+            val segment = uriString.substringAfter("youtu.be/").substringBefore("/").substringBefore("?").substringBefore("#")
+            if (segment.isNotBlank()) return segment
         }
 
         return null
+    }
+
+    /**
+     * Extracts YouTube video ID from a playback URI if applicable.
+     */
+    fun extractVideoIdFromUri(uri: Uri): String? {
+        return extractVideoIdFromUrl(uri.toString())
     }
 }
 

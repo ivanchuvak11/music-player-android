@@ -29,6 +29,17 @@
 6. **Локалізація та кодування (`strings.xml`)**:
    - Базові UI-тексти та статуси переведені в ресурси рядків `res/values/strings.xml` у чистому форматі UTF-8.
 
+7. **Мінімальна затримка старту треків (Instant Playback & Fast Buffering)**:
+   - В `YouTubeExtractorService`: додано метод `getCachedStreamUrl()`, який миттєво повертає вже розпарсений URL стріму з кешу без блокування потоку.
+   - В `AudioModel.toMediaItem()`: пряма підстановка розпарсеного CDN-посилання в `MediaItem`, що дозволяє ExoPlayer починати завантаження відразу, оминаючи синхронне перехоплення в `ResolvingDataSource`.
+   - В `MusicPlayerService`: оптимізовано конфігурацію `DefaultLoadControl` — поріг `bufferForPlaybackMs` зменшено з 500мс до **250мс** (аудіо починає грати вже з першого отриманого чанка), а `bufferForPlaybackAfterRebufferMs` — до **500мс**.
+
+8. **Архітектура Категорій, Жанрів, Виконавців та Готових Плейлистів (`CategoryModel.kt`, `CuratedMusicRepository.kt`)**:
+   - `MusicGenre`: моделі жанрів з градієнтами та швидкими запитами ("Українська музика", "Поп", "Рок", "Чіл & Лоу-фай", "Хіп-хоп", "Електроніка", "Тренування", "Релакс & Сон", "Джаз").
+   - `CuratedPlaylist`: готові тематичні добірки ("Топ Чарти України", "Chill & Lofi Beats", "Drive & Heavy Rock", "Gym Beast Mode", "Акустичний Затишок", "Retro Synthwave 80s").
+   - `ArtistInfo`: агрегація виконавців з підрахунком треків та миттєвим формуванням черги.
+   - `MainPlayerViewModel`: відкриті `StateFlow` (`musicGenres`, `curatedPlaylists`, `artists`) та методи запуску `playCuratedPlaylist()`, `playGenre()`, `playArtistTracks()`.
+
 ---
 
 ## 2. Що потрібно доопрацювати Бекенду (Іван)
@@ -69,17 +80,39 @@
   - Додано `GET /api/covers/image?artist={artist}&title={title}&q={query}` (прямий 302 Redirect на високоякісне зображення для Coil/Glide/AsyncImage в Jetpack Compose).
   - Результати кешуються на 7 днів.
 
+### Пріоритет 5: Динамічні готові плейлисти та топ виконавців [В ЧЕРЗІ 📋]
+* **Що потрібно реалізувати на бекенді:**
+  - `GET /api/curated/playlists` — список актуальних готових плейлистів (назва, опис, обкладинка, список треків з YouTube/Audius).
+  - `GET /api/curated/genres` — список актуальних музичних категорій та тегів.
+  - `GET /api/artists/top` — список популярних виконавців тижня для головного екрана.
+
 ---
 
 ## 3. Що потрібно доопрацювати Дизайну / UI (Богдан)
 
-### Пріоритет 1: Використання ресурсів рядків замість хардкоду
+### Пріоритет 1: Відображення Категорій, Виконавців та Готових Плейлистів (UI) [НОВЕ 🎨]
+* **Опис:** Вся логіка даних та ViewModel вже підготовлені Максимом в ядрі (`MainPlayerViewModel`). Потрібно лише оформити красивий UI/Compose шар.
+* **Що зробити:**
+  - **Карусель/Сітка Категорій (Жанрів)**:
+    - Використовувати `viewModel.musicGenres`.
+    - Зробити картки з красивими градієнтами `genre.gradientColors`, емодзі `genre.iconEmoji` та назвою `genre.name`.
+    - При кліку викликати `viewModel.playGenre(genre)`.
+  - **Секція «Готові Плейлисти» (Curated Playlists)**:
+    - Підписатися на `viewModel.curatedPlaylists.collectAsState()`.
+    - Горизонтальний скрол великих карток із закругленими кутами (Card/AsyncImage з обкладинкою `playlist.coverUrl`, заголовок і опис).
+    - При кліку викликати `viewModel.playCuratedPlaylist(playlist)`.
+  - **Вкладка або блок «Виконавці» (Artists)**:
+    - Підписатися на `viewModel.artists.collectAsState()`.
+    - Круглі аватари виконавців (CircleShape) із назвою та кількістю доступних треків `artist.trackCount`.
+    - При натисканні розкривати список треків виконавця або викликати `viewModel.playArtistTracks(artist)`.
+
+### Пріоритет 2: Використання ресурсів рядків замість хардкоду
 * **Проблема:** У файлах екранів Compose рядки інтерфейсу прописані напряму кирилицею в лапках, що створює ризик спотворення кодування на різних ОС.
 * **Що зробити:**
   - Використовувати `stringResource(R.string.btn_play)`, `stringResource(R.string.search_placeholder)` тощо.
   - Поповнювати `res/values/strings.xml`.
 
-### Пріоритет 2: Розділення `MainActivity.kt` на окремі Composable файли
+### Пріоритет 3: Розділення `MainActivity.kt` на окремі Composable файли
 * **Проблема:** `MainActivity.kt` містить понад 2100 рядків коду, де змішані стан плеєра, діалоги еквалайзера, списки треків та авторизація.
 * **Що зробити:**
   - Створити окрему папку `ui/screens/` або `ui/components/`:
