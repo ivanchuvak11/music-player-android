@@ -115,6 +115,17 @@ object YouTubeExtractorService {
     }
 
     /**
+     * Instantly retrieves cached Google Video CDN stream URL if valid, bypassing extraction latency.
+     */
+    fun getCachedStreamUrl(videoId: String): String? {
+        if (videoId.isBlank()) return null
+        val cleanId = videoId.trim().removePrefix("youtube_")
+        val cached = streamCache[cleanId] ?: return null
+        val now = System.currentTimeMillis()
+        return if (now < cached.expiresAt - 300_000L) cached.url else null
+    }
+
+    /**
      * Synchronous stream resolution (called by ResolvingDataSource on ExoPlayer background loading thread).
      */
     fun resolveAudioStreamUrlSync(videoId: String): String? {

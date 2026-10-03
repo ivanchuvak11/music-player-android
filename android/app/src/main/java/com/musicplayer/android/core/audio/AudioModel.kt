@@ -29,6 +29,17 @@ data class AudioTrack(
     val isLiveStream: Boolean = false
 ) {
     fun toMediaItem(): MediaItem {
+        val effectiveUriString = if (id.startsWith("youtube_") || audioUrl.contains("youtube.com") || audioUrl.contains("youtu.be")) {
+            val videoId = try {
+                YouTubeExtractorService.extractVideoIdFromUri(Uri.parse(audioUrl)) ?: id.removePrefix("youtube_")
+            } catch (e: Exception) {
+                id.removePrefix("youtube_")
+            }
+            YouTubeExtractorService.getCachedStreamUrl(videoId) ?: audioUrl
+        } else {
+            audioUrl
+        }
+
         val metadata = MediaMetadata.Builder()
             .setTitle(title)
             .setArtist(artist)
@@ -38,7 +49,7 @@ data class AudioTrack(
 
         return MediaItem.Builder()
             .setMediaId(id)
-            .setUri(audioUrl)
+            .setUri(effectiveUriString)
             .setMediaMetadata(metadata)
             .build()
     }
@@ -194,6 +205,9 @@ fun CachedTrackEntity.toAudioTrack(): AudioTrack = AudioTrack(
     isLocal = localFilePath != null,
     isLiveStream = false
 )
+
+fun com.musicplayer.android.core.network.YouTubeTrackDto.toAudioTrack(backendBaseUrl: String = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL): AudioTrack =
+    AudioTrack.fromYouTube(this, backendBaseUrl)
 
 /**
  * Current playback state observed by UI components.

@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -252,6 +253,25 @@ class MainPlayerViewModel(
     val isLoadingAutoplay: StateFlow<Boolean> = _isLoadingAutoplay.asStateFlow()
 
     private var autoplayJob: Job? = null
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // ─── Categories, Curated Playlists & Artists (Core Architecture) ──────────
+    val musicGenres: List<com.musicplayer.android.core.audio.MusicGenre> =
+        com.musicplayer.android.core.audio.CuratedMusicRepository.predefinedGenres
+
+    private val _curatedPlaylists = MutableStateFlow<List<com.musicplayer.android.core.audio.CuratedPlaylist>>(
+        com.musicplayer.android.core.audio.CuratedMusicRepository.predefinedPlaylists
+    )
+    val curatedPlaylists: StateFlow<List<com.musicplayer.android.core.audio.CuratedPlaylist>> = _curatedPlaylists.asStateFlow()
+
+    val artists: StateFlow<List<com.musicplayer.android.core.audio.ArtistInfo>> = _localTracks
+        .map { tracks ->
+            com.musicplayer.android.core.audio.CuratedMusicRepository.extractArtists(tracks)
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    private val _curatedTracksLoading = MutableStateFlow(false)
+    val curatedTracksLoading: StateFlow<Boolean> = _curatedTracksLoading.asStateFlow()
     // ──────────────────────────────────────────────────────────────────────────
 
     init {
@@ -1871,6 +1891,70 @@ class MainPlayerViewModel(
         NetworkClient.authInterceptor.authToken = null
         _currentUser.value = null
         _authStatusMessage.value = "Ви вийшли з акаунту"
+    }
+
+    /**
+     * Plays a curated playlist. If tracks are already populated, starts playback immediately.
+     * Otherwise fetches tracks using YouTube search for the playlist topic and plays them.
+     */
+    fun playCuratedPlaylist(playlist: com.musicplayer.android.core.audio.CuratedPlaylist, startIndex: Int = 0) {
+        viewModelScope.launch {
+            if (playlist.tracks.isNotEmpty()) {
+                playQueue(playlist.tracks, startIndex)
+                return@launch
+            }
+            if (playlist.searchQuery.isNotBlank()) {
+                _curatedTracksLoading.value = true
+                try {
+                    val dtoList = withContext(Dispatchers.IO) {
+                        com.musicplayer.android.core.audio.YouTubeExtractorService.search(playlist.searchQuery, limit = 25)
+                    }
+                    val tracks = dtoList.map { it.toAudioTrack() }
+                    if (tracks.isNotEmpty()) {
+                        // Cache tracks in memory / state
+                        _curatedPlaylists.value = _curatedPlaylists.value.map {
+                            if (it.id == playlist.id) it.copy(tracks = tracks) else it
+                        }
+                        playQueue(tracks, startIndex)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainPlayerViewModel", "Failed to load curated playlist: ${playlist.title}", e)
+                } finally {
+                    _curatedTracksLoading.value = false
+                }
+            }
+        }
+    }
+
+    /**
+     * Plays tracks for a given music genre / mood category.
+     */
+    fun playGenre(genre: com.musicplayer.android.core.audio.MusicGenre) {
+        viewModelScope.launch {
+            _curatedTracksLoading.value = true
+            try {
+                val dtoList = withContext(Dispatchers.IO) {
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.search(genre.searchQuery, limit = 25)
+                }
+                val tracks = dtoList.map { it.toAudioTrack() }
+                if (tracks.isNotEmpty()) {
+                    playQueue(tracks, 0)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("MainPlayerViewModel", "Failed to load genre tracks: ${genre.name}", e)
+            } finally {
+                _curatedTracksLoading.value = false
+            }
+        }
+    }
+
+    /**
+     * Plays all tracks by a specific artist.
+     */
+    fun playArtistTracks(artist: com.musicplayer.android.core.audio.ArtistInfo, startIndex: Int = 0) {
+        if (artist.tracks.isNotEmpty()) {
+            playQueue(artist.tracks, startIndex)
+        }
     }
 
     override fun onCleared() {
