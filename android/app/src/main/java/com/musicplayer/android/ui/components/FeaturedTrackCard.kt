@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -34,6 +35,8 @@ import com.musicplayer.android.ui.theme.DarkRefTheme
 fun FeaturedTrackCard(
     track: AudioTrack,
     onPlay: () -> Unit,
+    isCurrentTrack: Boolean = false,
+    isPlayingThisTrack: Boolean = false,
     modifier: Modifier = Modifier,
     size: Dp = 180.dp
 ) {
@@ -116,13 +119,17 @@ fun FeaturedTrackCard(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.28f)),
+                        .background(
+                            if (isPlayingThisTrack) DarkRefTheme.AccentMint.copy(alpha = 0.35f)
+                            else if (isCurrentTrack) DarkRefTheme.AccentMint.copy(alpha = 0.20f)
+                            else Color.White.copy(alpha = 0.28f)
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.PlayArrow,
-                        contentDescription = "Play",
-                        tint = Color.White,
+                        imageVector = if (isPlayingThisTrack) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = if (isPlayingThisTrack) "Pause" else "Play",
+                        tint = if (isPlayingThisTrack || isCurrentTrack) DarkRefTheme.AccentMint else Color.White,
                         modifier = Modifier.size(20.dp)
                     )
                 }

@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -39,6 +40,9 @@ fun LocalPlaylistCard(
     modifier: Modifier = Modifier
 ) {
     val tracks by viewModel.getPlaylistTracks(playlist.id).collectAsState(initial = emptyList())
+    val playbackState by viewModel.playbackState.collectAsState()
+    val currentTrackId = playbackState.currentTrack?.id
+    val isPlaybackPlaying = playbackState.isPlaying
 
     Column(
         modifier = modifier
@@ -145,14 +149,22 @@ fun LocalPlaylistCard(
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
+                        val isTrackCurrent = currentTrackId == trackEntity.trackId
+                        val isTrackPlaying = isTrackCurrent && isPlaybackPlaying
                         IconButton(
-                            onClick = { viewModel.playTrack(trackEntity.toAudioTrack()) },
+                            onClick = {
+                                if (isTrackCurrent) {
+                                    if (isPlaybackPlaying) viewModel.pause() else viewModel.play()
+                                } else {
+                                    viewModel.playTrack(trackEntity.toAudioTrack())
+                                }
+                            },
                             modifier = Modifier.size(32.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Rounded.PlayArrow,
-                                contentDescription = "Play",
-                                tint = Color.White,
+                                imageVector = if (isTrackPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (isTrackPlaying) "Pause" else "Play",
+                                tint = if (isTrackPlaying || isTrackCurrent) DarkRefTheme.AccentMint else Color.White,
                                 modifier = Modifier.size(18.dp)
                             )
                         }
