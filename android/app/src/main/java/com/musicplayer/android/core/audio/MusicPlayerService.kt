@@ -65,13 +65,13 @@ class MusicPlayerService : MediaSessionService() {
             .setUsage(C.USAGE_MEDIA)
             .build()
 
-        // Optimized LoadControl: starts playback almost immediately (<1s buffer)
+        // Optimized LoadControl: starts playback almost immediately (<500ms buffer)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 /* minBufferMs = */ 15_000,
                 /* maxBufferMs = */ 50_000,
-                /* bufferForPlaybackMs = */ 1_000,
-                /* bufferForPlaybackAfterRebufferMs = */ 2_000
+                /* bufferForPlaybackMs = */ 500,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_000
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()

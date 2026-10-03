@@ -4,6 +4,7 @@ import android.net.Uri
 import android.util.Log
 import com.musicplayer.android.core.network.YouTubeTrackDto
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -42,6 +43,34 @@ object YouTubeExtractorService {
      */
     suspend fun resolveAudioStreamUrl(videoId: String): String? = withContext(Dispatchers.IO) {
         resolveAudioStreamUrlSync(videoId)
+    }
+
+    private val prefetchJob = kotlinx.coroutines.SupervisorJob()
+    private val prefetchScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + prefetchJob)
+
+    /**
+     * Pre-resolves audio stream URLs for upcoming tracks in the queue in background.
+     * When user skips or track transitions, playback starts with 0ms delay!
+     */
+    fun prefetchNextTracks(videoIds: List<String>) {
+        if (videoIds.isEmpty()) return
+        prefetchScope.launch {
+            for (id in videoIds.take(3)) {
+                val cleanId = id.trim().removePrefix("youtube_")
+                if (cleanId.isNotBlank()) {
+                    val now = System.currentTimeMillis()
+                    val cached = streamCache[cleanId]
+                    if (cached == null || now >= cached.expiresAt - 300_000L) {
+                        try {
+                            Log.d(TAG, "Prefetching audio stream for upcoming track: videoId=$cleanId")
+                            resolveAudioStreamUrlSync(cleanId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Prefetch failed for $cleanId: ${e.message}")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /**

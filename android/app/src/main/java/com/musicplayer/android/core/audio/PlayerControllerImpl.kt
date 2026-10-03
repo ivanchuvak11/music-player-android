@@ -141,6 +141,15 @@ class PlayerControllerImpl(
                 retryJob = null
                 _playbackState.value = _playbackState.value.copy(errorMessage = null)
                 updateState()
+
+                // Prefetch upcoming tracks in queue for instantaneous next track playback
+                val controller = mediaController
+                if (controller != null && currentQueue.isNotEmpty()) {
+                    val currentIndex = controller.currentMediaItemIndex
+                    val upcoming = currentQueue.drop(currentIndex + 1).take(3)
+                    val upcomingIds = upcoming.map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                    YouTubeExtractorService.prefetchNextTracks(upcomingIds)
+                }
             }
 
             override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -361,6 +370,10 @@ class PlayerControllerImpl(
             controller.play()
         }
         updateState()
+
+        val upcoming = tracks.drop(safeStartIndex + 1).take(3)
+        val upcomingIds = upcoming.map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+        YouTubeExtractorService.prefetchNextTracks(upcomingIds)
     }
 
     override fun playTrack(track: AudioTrack, startPositionMs: Long) {
@@ -447,6 +460,9 @@ class PlayerControllerImpl(
         if (controller != null) {
             controller.addMediaItem(track.toMediaItem())
             updateState()
+            if (track.id.startsWith("youtube_") || track.id.contains("youtu")) {
+                YouTubeExtractorService.prefetchNextTracks(listOf(track.id))
+            }
         } else {
             val currentPq = pendingQueue
             pendingQueue = if (currentPq != null) {

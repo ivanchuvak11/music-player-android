@@ -357,12 +357,12 @@ class MainPlayerViewModel(
                 val track = state.currentTrack ?: return@collect
                 val repeatOff = state.repeatMode == PlaybackState.REPEAT_MODE_OFF
                 val autoplayOn = _autoplayEnabled.value
-                val isNearEnd = state.durationMs > 0L &&
-                    state.currentPositionMs >= (state.durationMs - 8_000L)
+                val isNearEnd = (state.durationMs > 0L && state.currentPositionMs >= (state.durationMs - 20_000L)) ||
+                    (state.durationMs <= 0L && state.currentPositionMs >= 25_000L)
 
-                // Trigger fetch 8 seconds before the last track ends (like Spotify/YT Music)
+                // Trigger fetch 20 seconds before the last track ends for gapless Spotify-like continuation
                 if (autoplayOn && repeatOff && !state.hasNext &&
-                    !track.isLiveStream && !track.isLocal &&
+                    !track.isLiveStream &&
                     state.isPlaying && isNearEnd &&
                     track.id != lastAutoplayTriggeredForTrackId &&
                     autoplayJob?.isActive != true
@@ -426,6 +426,8 @@ class MainPlayerViewModel(
                 if (similar.isNotEmpty()) {
                     similar.forEach { track -> playerController.addToQueue(track) }
                     android.util.Log.i("Autoplay", "Added ${similar.size} similar tracks to queue")
+                    val upcomingIds = similar.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
                     // If player is ended or reached the end while fetching, advance to the new track
                     val state = playbackState.value
                     if (!state.isPlaying && (state.currentPositionMs >= (currentTrack.durationMs - 1500L).coerceAtLeast(0L) || currentTrack.durationMs <= 0L)) {
@@ -464,6 +466,8 @@ class MainPlayerViewModel(
                 if (similar.isNotEmpty()) {
                     similar.forEach { track -> playerController.addToQueue(track) }
                     android.util.Log.i("Autoplay", "Explicit Next: appended ${similar.size} similar tracks")
+                    val upcomingIds = similar.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
                     delay(200)
                     playerController.playNext()
                 } else if (currentQueue.size > 1) {
@@ -496,6 +500,9 @@ class MainPlayerViewModel(
      * Loads a list of similar tracks for the given seed track to display in UI.
      */
     fun loadSimilarTracks(seedTrack: AudioTrack) {
+        if (_selectedSimilarSeedTrack.value?.id == seedTrack.id && _similarTracks.value.isNotEmpty()) {
+            return
+        }
         _selectedSimilarSeedTrack.value = seedTrack
         _similarTracks.value = emptyList()
         similarTracksJob?.cancel()
@@ -508,6 +515,8 @@ class MainPlayerViewModel(
                     limit = 20
                 )
                 _similarTracks.value = results
+                val upcomingIds = results.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
             } catch (e: Exception) {
                 if (e !is kotlinx.coroutines.CancellationException) {
                     android.util.Log.e("Autoplay", "Failed to load similar tracks: ${e.message}")

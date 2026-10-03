@@ -12,6 +12,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -20,6 +23,7 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Shuffle
@@ -27,6 +31,8 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import kotlinx.coroutines.launch
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -92,6 +98,13 @@ fun NowPlayingSheet(
         if (playbackState.queue.isNotEmpty()) playbackState.queue else listOf(activeTrack)
     }
     val activeTrackIndex = currentQueue.indexOfFirst { it.id == activeTrack.id }.coerceAtLeast(0)
+    val upcomingQueueTracks = remember(currentQueue, activeTrackIndex) {
+        if (activeTrackIndex in currentQueue.indices && activeTrackIndex < currentQueue.lastIndex) {
+            currentQueue.drop(activeTrackIndex + 1)
+        } else {
+            emptyList()
+        }
+    }
 
     val pagerState = key(currentQueue) {
         rememberPagerState(
@@ -114,8 +127,17 @@ fun NowPlayingSheet(
     val wheelProgress = remember { Animatable(0f) }
     val extraSideOffset = remember { Animatable(0f) }
     var showEqualizerDialog by remember { mutableStateOf(false) }
-    var showSimilarTracksDialog by remember { mutableStateOf(false) }
     val audioEffectsState by viewModel.audioEffectsState.collectAsState()
+    val similarTracks by viewModel.similarTracks.collectAsState()
+    val isLoadingSimilarTracks by viewModel.isLoadingSimilarTracks.collectAsState()
+    val isAutoplayEnabled by viewModel.autoplayEnabled.collectAsState()
+    val sheetScrollState = rememberScrollState()
+    val coroutineScope = rememberCoroutineScope()
+
+    // Automatically pre-load similar tracks for the active track
+    LaunchedEffect(activeTrack.id) {
+        viewModel.loadSimilarTracks(activeTrack)
+    }
 
     // Smooth 3-phase circular arc roll when track changes under shuffle:
     // Phase 1: Side covers quickly slide in from behind screen edges
@@ -289,7 +311,8 @@ fun NowPlayingSheet(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 8.dp),
+                    .verticalScroll(sheetScrollState)
+                    .padding(bottom = 28.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Drag handle pill placed floating on top of glow at top of sheet
@@ -583,11 +606,11 @@ fun NowPlayingSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Additional tools: Shuffle, Repeat, Add to Playlist with mint glowing highlights
+            // Additional tools: Shuffle, Repeat, Equalizer, Add to Playlist with mint glowing highlights
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
+                    .padding(horizontal = 24.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -643,25 +666,6 @@ fun NowPlayingSheet(
                     )
                 }
 
-                // Similar Tracks (Song Radio) quick tool button
-                IconButton(
-                    onClick = {
-                        viewModel.loadSimilarTracks(activeTrack)
-                        showSimilarTracksDialog = true
-                    },
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(DarkRefTheme.AccentMint.copy(alpha = 0.12f))
-                        .padding(2.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.AutoAwesome,
-                        contentDescription = "Схожі пісні",
-                        tint = DarkRefTheme.AccentMint,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
                 IconButton(
                     onClick = { onAddToPlaylist(activeTrack) }
                 ) {
@@ -671,6 +675,421 @@ fun NowPlayingSheet(
                         tint = DarkRefTheme.TextSecondary,
                         modifier = Modifier.size(26.dp)
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Scroll Cue / Divider
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = Color.White.copy(alpha = 0.10f)
+                )
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 10.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(DarkRefTheme.SurfaceCardElevated.copy(alpha = 0.85f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+                        .clickable {
+                            coroutineScope.launch {
+                                sheetScrollState.animateScrollTo(sheetScrollState.maxValue)
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = DarkRefTheme.AccentMint,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Черга та схожі пісні",
+                        color = DarkRefTheme.TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = Color.White.copy(alpha = 0.10f)
+                )
+            }
+
+            // 1. Upcoming in Queue (Далі у черзі)
+            if (upcomingQueueTracks.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
+                                contentDescription = null,
+                                tint = DarkRefTheme.AccentMint,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Далі у черзі",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DarkRefTheme.TextPrimary
+                            )
+                        }
+                        Text(
+                            text = "${upcomingQueueTracks.size} треків",
+                            fontSize = 12.sp,
+                            color = DarkRefTheme.TextSecondary
+                        )
+                    }
+
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        upcomingQueueTracks.take(8).forEach { track ->
+                            Surface(
+                                onClick = { viewModel.playTrack(track) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = DarkRefTheme.SurfaceCard.copy(alpha = 0.7f),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TrackArtwork(
+                                        artworkUrl = track.artworkUrl,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = track.title,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Medium,
+                                            fontSize = 13.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = track.artist,
+                                            color = DarkRefTheme.TextSecondary,
+                                            fontSize = 12.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    if (track.durationMs > 0L) {
+                                        Text(
+                                            text = formatTrackDuration(track.durationMs),
+                                            color = DarkRefTheme.TextSecondary.copy(alpha = 0.7f),
+                                            fontSize = 11.5.sp
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.playTrack(track) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.PlayArrow,
+                                            contentDescription = "Play",
+                                            tint = DarkRefTheme.AccentMint,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. Similar Tracks / Autoplay Section (Схожі пісні / Автоматичний мікс)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+            ) {
+                // Header with Smart Sparkles & Autoplay Switch (like Spotify / YouTube Music)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f, fill = false)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(DarkRefTheme.AccentMint.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = DarkRefTheme.AccentMint,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Схожі пісні",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = DarkRefTheme.TextPrimary
+                            )
+                            Text(
+                                text = if (isAutoplayEnabled) "Гратимуть автоматично, коли закінчиться черга" else "Підібрані треки для продовження",
+                                fontSize = 11.sp,
+                                color = DarkRefTheme.TextSecondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    // Autoplay toggle button (like Spotify/YT Music)
+                    Surface(
+                        onClick = { viewModel.toggleAutoplay() },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isAutoplayEnabled) DarkRefTheme.AccentMint.copy(alpha = 0.18f) else DarkRefTheme.SurfaceCardElevated,
+                        border = BorderStroke(1.dp, if (isAutoplayEnabled) DarkRefTheme.AccentMint.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.1f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Text(
+                                text = if (isAutoplayEnabled) "Автоплей: Увімк" else "Автоплей: Вимк",
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (isAutoplayEnabled) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Quick Actions: "Слухати мікс" and "+ В чергу"
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { viewModel.playSimilarTracks(activeTrack) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = DarkRefTheme.AccentMint,
+                            contentColor = DarkRefTheme.BackgroundDark
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 10.dp, horizontal = 12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Слухати мікс",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp
+                        )
+                    }
+
+                    if (similarTracks.isNotEmpty()) {
+                        OutlinedButton(
+                            onClick = { viewModel.addLoadedSimilarTracksToQueue() },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = Color.White
+                            ),
+                            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f)),
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 10.dp, horizontal = 12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "+ В чергу (${similarTracks.size})",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Track list / Loading indicator
+                if (isLoadingSimilarTracks) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 28.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(
+                                color = DarkRefTheme.AccentMint,
+                                strokeWidth = 2.5.dp,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "Підбираємо схожі пісні...",
+                                color = DarkRefTheme.TextSecondary,
+                                fontSize = 12.5.sp
+                            )
+                        }
+                    }
+                } else if (similarTracks.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = DarkRefTheme.SurfaceCard.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "Схожих треків поки не знайдено",
+                                color = DarkRefTheme.TextSecondary,
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            TextButton(
+                                onClick = { viewModel.loadSimilarTracks(activeTrack) }
+                            ) {
+                                Text(
+                                    text = "Оновити підбір",
+                                    color = DarkRefTheme.AccentMint,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        similarTracks.forEach { track ->
+                            Surface(
+                                onClick = { viewModel.playTrack(track) },
+                                shape = RoundedCornerShape(12.dp),
+                                color = DarkRefTheme.SurfaceCard.copy(alpha = 0.7f),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TrackArtwork(
+                                        artworkUrl = track.artworkUrl,
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = track.title,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Medium,
+                                            fontSize = 13.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = track.artist,
+                                            color = DarkRefTheme.TextSecondary,
+                                            fontSize = 11.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
+                                    if (track.durationMs > 0L) {
+                                        Text(
+                                            text = formatTrackDuration(track.durationMs),
+                                            color = DarkRefTheme.TextSecondary.copy(alpha = 0.7f),
+                                            fontSize = 11.sp
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                    }
+
+                                    IconButton(
+                                        onClick = { viewModel.addToQueue(track) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                            contentDescription = "Add to queue",
+                                            tint = DarkRefTheme.TextSecondary,
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = { viewModel.playTrack(track) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.PlayArrow,
+                                            contentDescription = "Play",
+                                            tint = DarkRefTheme.AccentMint,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -684,14 +1103,6 @@ fun NowPlayingSheet(
                 viewModel = viewModel,
                 audioEffectsState = audioEffectsState,
                 onDismiss = { showEqualizerDialog = false }
-            )
-        }
-
-        if (showSimilarTracksDialog) {
-            SimilarTracksDialog(
-                seedTrack = activeTrack,
-                viewModel = viewModel,
-                onDismiss = { showSimilarTracksDialog = false }
             )
         }
     }
