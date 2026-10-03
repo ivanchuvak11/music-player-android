@@ -81,20 +81,20 @@ class MainPlayerViewModel(
     application: Application,
     private val playerController: PlayerController = PlayerControllerImpl(application),
     private var apiService: MusicApiService = NetworkClient.createService(
-        baseUrl = SessionManager(application).getBaseUrl(),
+        baseUrl = SessionManager.getInstance(application).getBaseUrl(),
         context = application
     ),
-    private val sessionManager: SessionManager = SessionManager(application)
+    private val sessionManager: SessionManager = SessionManager.getInstance(application)
 ) : AndroidViewModel(application) {
 
     constructor(application: Application) : this(
         application,
         PlayerControllerImpl(application),
         NetworkClient.createService(
-            baseUrl = SessionManager(application).getBaseUrl(),
+            baseUrl = SessionManager.getInstance(application).getBaseUrl(),
             context = application
         ),
-        SessionManager(application)
+        SessionManager.getInstance(application)
     )
 
     private val db = AppDatabase.getDatabase(application)

@@ -15,12 +15,24 @@ import java.util.concurrent.TimeUnit
  * bypassing server-side IP datacenter bans.
  */
 class NewPipeDownloader(
-    private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .followRedirects(true)
-        .build()
+    private val client: OkHttpClient = sharedClient
 ) : Downloader() {
+
+    companion object {
+        /**
+         * Shared OkHttpClient with connection pooling (up to 8 idle connections kept alive for 5 minutes).
+         * Eliminates repetitive TLS handshakes and drastically speeds up search and stream extraction.
+         */
+        val sharedClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
+                .connectTimeout(12, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .followRedirects(true)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
+    }
 
     @Throws(IOException::class)
     override fun execute(request: Request): Response {

@@ -45,5 +45,29 @@ class YouTubeExtractorServiceTest {
         }
         assert(results.isNotEmpty()) { "Search results should not be empty" }
     }
+
+    @Test
+    fun testSearchCacheHit() = kotlinx.coroutines.runBlocking {
+        val start1 = System.currentTimeMillis()
+        val firstResults = YouTubeExtractorService.search("phonk", 5)
+        val duration1 = System.currentTimeMillis() - start1
+
+        val start2 = System.currentTimeMillis()
+        val secondResults = YouTubeExtractorService.search("phonk", 5)
+        val duration2 = System.currentTimeMillis() - start2
+
+        println("First search took ${duration1}ms, second search (cache hit) took ${duration2}ms")
+        assert(secondResults.size == firstResults.size) { "Cache hit should return identical list" }
+        assert(duration2 < 50) { "Second search should be instant from memory cache (<50ms)" }
+    }
+
+    @Test
+    fun testExtractVideoId() {
+        assert(YouTubeExtractorService.extractVideoIdFromUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "dQw4w9WgXcQ")
+        assert(YouTubeExtractorService.extractVideoIdFromUrl("https://youtu.be/dQw4w9WgXcQ?t=4") == "dQw4w9WgXcQ")
+        assert(YouTubeExtractorService.extractVideoIdFromUrl("youtube://dQw4w9WgXcQ") == "dQw4w9WgXcQ")
+        assert(YouTubeExtractorService.extractVideoIdFromUrl("youtube_dQw4w9WgXcQ") == "dQw4w9WgXcQ")
+        assert(YouTubeExtractorService.extractVideoIdFromUrl("https://rr1---sn.googlevideo.com/videoplayback") == null)
+    }
 }
 

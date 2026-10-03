@@ -72,13 +72,16 @@ object NetworkClient {
                     false
                 }
 
+                // Core Optimization: Level.BASIC avoids massive JSON String allocations that flood Logcat and trigger GC stutters
                 val loggingLevel = if (isDebug) {
-                    HttpLoggingInterceptor.Level.BODY
+                    HttpLoggingInterceptor.Level.BASIC
                 } else {
                     HttpLoggingInterceptor.Level.NONE
                 }
 
                 val builder = OkHttpClient.Builder()
+                    .connectionPool(okhttp3.ConnectionPool(5, 5, TimeUnit.MINUTES))
+                    .retryOnConnectionFailure(true)
                     .addInterceptor(authInterceptor)
                     .addInterceptor(HttpLoggingInterceptor().apply {
                         level = loggingLevel

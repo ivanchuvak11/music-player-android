@@ -22,8 +22,47 @@ object YouTubeExtractorService {
     private const val TAG = "YouTubeExtractor"
     private var isInitialized = false
 
+    private const val MAX_STREAM_CACHE_SIZE = 150
     private data class CachedStream(val url: String, val expiresAt: Long)
     private val streamCache = ConcurrentHashMap<String, CachedStream>()
+
+    private fun putStreamInCache(id: String, stream: CachedStream) {
+        if (streamCache.size >= MAX_STREAM_CACHE_SIZE) {
+            val now = System.currentTimeMillis()
+            // Evict expired entries
+            val iterator = streamCache.entries.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (now >= entry.value.expiresAt) {
+                    iterator.remove()
+                }
+            }
+            // If still over capacity, remove arbitrary excess
+            if (streamCache.size >= MAX_STREAM_CACHE_SIZE) {
+                val excess = streamCache.keys.take(streamCache.size - MAX_STREAM_CACHE_SIZE + 1)
+                excess.forEach { streamCache.remove(it) }
+            }
+        }
+        streamCache[id] = stream
+    }
+
+    // In-memory LRU query caches: 40 entries, 15 min TTL (0ms latency on repeated queries or tab switches)
+    private data class CachedSearchResults(val tracks: List<YouTubeTrackDto>, val timestamp: Long)
+    private const val MAX_SEARCH_CACHE = 40
+    private const val SEARCH_CACHE_TTL_MS = 15 * 60 * 1000L // 15 minutes
+
+    private val searchCacheLock = Any()
+    private val searchCache = object : LinkedHashMap<String, CachedSearchResults>(MAX_SEARCH_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedSearchResults>?): Boolean {
+            return size > MAX_SEARCH_CACHE
+        }
+    }
+
+    private val relatedCache = object : LinkedHashMap<String, CachedSearchResults>(MAX_SEARCH_CACHE, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedSearchResults>?): Boolean {
+            return size > MAX_SEARCH_CACHE
+        }
+    }
 
     @Synchronized
     fun init() {
@@ -106,10 +145,13 @@ object YouTubeExtractorService {
             val streamUrl = bestAudio.content
 
             if (!streamUrl.isNullOrBlank()) {
-                // Cache for 2 hours (Google Video CDN URLs are valid for ~6 hours)
-                streamCache[cleanId] = CachedStream(
-                    url = streamUrl,
-                    expiresAt = now + (2 * 3600 * 1000L)
+                // Cache for 2 hours (Google Video CDN URLs are valid for ~6 hours) with LRU bounded capacity
+                putStreamInCache(
+                    cleanId,
+                    CachedStream(
+                        url = streamUrl,
+                        expiresAt = now + (2 * 3600 * 1000L)
+                    )
                 )
                 Log.i(TAG, "Resolved audio stream URL for videoId=$cleanId (bitrate=${bestAudio.bitrate}bps)")
                 streamUrl
@@ -129,6 +171,19 @@ object YouTubeExtractorService {
      */
     suspend fun search(query: String, limit: Int = 20): List<YouTubeTrackDto> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
+        val normalizedQuery = query.trim().lowercase()
+        val cacheKey = "${normalizedQuery}_$limit"
+        val now = System.currentTimeMillis()
+
+        // 0ms instant cache hit on backspace, tab switch, or repeated queries
+        synchronized(searchCacheLock) {
+            val cached = searchCache[cacheKey]
+            if (cached != null && now - cached.timestamp < SEARCH_CACHE_TTL_MS) {
+                Log.d(TAG, "Instant search cache HIT for '$query' (${cached.tracks.size} tracks)")
+                return@withContext cached.tracks
+            }
+        }
+
         init()
 
         return@withContext try {
@@ -197,6 +252,12 @@ object YouTubeExtractorService {
                 }
             }
 
+            if (tracks.isNotEmpty()) {
+                synchronized(searchCacheLock) {
+                    searchCache[cacheKey] = CachedSearchResults(tracks, now)
+                }
+            }
+
             Log.d(TAG, "Search '$query' found ${tracks.size} tracks directly via client extractor")
             tracks
         } catch (e: Exception) {
@@ -214,8 +275,20 @@ object YouTubeExtractorService {
      */
     suspend fun getRelatedTracks(videoId: String, limit: Int = 15): List<YouTubeTrackDto> = withContext(Dispatchers.IO) {
         if (videoId.isBlank()) return@withContext emptyList()
-        init()
         val cleanId = videoId.trim().removePrefix("youtube_")
+        val cacheKey = "${cleanId}_$limit"
+        val now = System.currentTimeMillis()
+
+        // 0ms instant cache hit on back-navigation or repeat mix requests
+        synchronized(searchCacheLock) {
+            val cached = relatedCache[cacheKey]
+            if (cached != null && now - cached.timestamp < SEARCH_CACHE_TTL_MS) {
+                Log.d(TAG, "Instant related tracks cache HIT for '$cleanId' (${cached.tracks.size} tracks)")
+                return@withContext cached.tracks
+            }
+        }
+
+        init()
         try {
             val videoUrl = "https://www.youtube.com/watch?v=$cleanId"
             val streamInfo = StreamInfo.getInfo(ServiceList.YouTube, videoUrl)
@@ -249,6 +322,13 @@ object YouTubeExtractorService {
                 )
                 if (results.size >= limit) break
             }
+
+            if (results.isNotEmpty()) {
+                synchronized(searchCacheLock) {
+                    relatedCache[cacheKey] = CachedSearchResults(results, now)
+                }
+            }
+
             Log.d(TAG, "Related tracks for videoId=$cleanId: ${results.size} found")
             results
         } catch (e: Exception) {
