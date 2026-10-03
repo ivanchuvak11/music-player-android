@@ -56,6 +56,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import com.musicplayer.android.core.audio.AudioTrack
+import com.musicplayer.android.core.audio.areTrackIdsEqual
 import com.musicplayer.android.core.audio.calculateSearchRelevanceScore
 import com.musicplayer.android.core.audio.searchDeduplicationKey
 import com.musicplayer.android.core.audio.toAudioTrack
@@ -267,8 +268,15 @@ fun PlayerCoreScreen() {
         }
     }
 
+    val lastSession = remember { viewModel.getLastPlayedTrack() }
+    val rememberedTrack = lastSession?.first
+    val rememberedPosition = lastSession?.second ?: 0L
+    val currentOrRememberedTrack = currentPlayingTrack ?: rememberedTrack
+
     val handleTrackPlayPause: (AudioTrack, () -> Unit) -> Unit = { track, defaultStartQueue ->
-        if (currentPlayingTrack?.id == track.id) {
+        val isCurrent = areTrackIdsEqual(currentPlayingTrack?.id, track.id) ||
+                (currentPlayingTrack == null && areTrackIdsEqual(rememberedTrack?.id, track.id))
+        if (isCurrent) {
             if (isPlaybackPlaying) viewModel.pause() else viewModel.play()
         } else {
             defaultStartQueue()
@@ -282,11 +290,6 @@ fun PlayerCoreScreen() {
         searchSourceFilter = SearchSourceFilter.ALL
         focusManager.clearFocus()
     }
-
-    val lastSession = remember { viewModel.getLastPlayedTrack() }
-    val rememberedTrack = lastSession?.first
-    val rememberedPosition = lastSession?.second ?: 0L
-    val currentOrRememberedTrack = currentPlayingTrack ?: rememberedTrack
 
     val listContentPadding = PaddingValues(
         top = 146.dp,
@@ -472,7 +475,7 @@ fun PlayerCoreScreen() {
                                     key = { "s_loc_${it.id}" },
                                     contentType = { "track" }
                                 ) { track ->
-                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                     val isPlaying = isCurrent && isPlaybackPlaying
                                     TrackItemRow(
                                         track = track,
@@ -491,7 +494,7 @@ fun PlayerCoreScreen() {
                                             viewModel.loadSimilarTracks(track)
                                         },
                                         onTrackCardClick = {
-                                            if (!isCurrent) {
+                                            handleTrackPlayPause(track) {
                                                 viewModel.playLocalTrack(track)
                                             }
                                             showNowPlayingSheet = true
@@ -514,7 +517,7 @@ fun PlayerCoreScreen() {
                                     key = { "s_cac_${it.id}" },
                                     contentType = { "track" }
                                 ) { track ->
-                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                     val isPlaying = isCurrent && isPlaybackPlaying
                                     TrackItemRow(
                                         track = track,
@@ -529,7 +532,7 @@ fun PlayerCoreScreen() {
                                         onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                                         onTrackCardClick = {
-                                            if (!isCurrent) {
+                                            handleTrackPlayPause(track) {
                                                 viewModel.playLocalTrack(track)
                                             }
                                             showNowPlayingSheet = true
@@ -552,7 +555,7 @@ fun PlayerCoreScreen() {
                                     key = { "s_onl_${it.id}" },
                                     contentType = { "track" }
                                 ) { track ->
-                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                     val isPlaying = isCurrent && isPlaybackPlaying
                                     TrackItemRow(
                                         track = track,
@@ -570,13 +573,13 @@ fun PlayerCoreScreen() {
                                         onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                                         onTrackCardClick = {
-                                            playOnlineSafely {
-                                                if (!isCurrent) {
+                                            handleTrackPlayPause(track) {
+                                                playOnlineSafely {
                                                     val idx = onlineResults.indexOf(track).coerceAtLeast(0)
                                                     viewModel.playQueue(onlineResults, idx)
                                                 }
-                                                showNowPlayingSheet = true
                                             }
+                                            showNowPlayingSheet = true
                                         }
                                     )
                                 }
@@ -598,7 +601,7 @@ fun PlayerCoreScreen() {
                                     key = { "s_loc_f_${it.id}" },
                                     contentType = { "track" }
                                 ) { track ->
-                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                     val isPlaying = isCurrent && isPlaybackPlaying
                                     TrackItemRow(
                                         track = track,
@@ -613,7 +616,7 @@ fun PlayerCoreScreen() {
                                         onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                                         onTrackCardClick = {
-                                            if (!isCurrent) {
+                                            handleTrackPlayPause(track) {
                                                 viewModel.playQueue(allLocalResults, allLocalResults.indexOf(track).coerceAtLeast(0))
                                             }
                                             showNowPlayingSheet = true
@@ -644,7 +647,7 @@ fun PlayerCoreScreen() {
                                         text = "YouTube Music (${youtubeResults.size}):",
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color(0xFFFF6B6B)
+                                        color = Color(0xFFFF5252)
                                     )
                                 }
                                 items(
@@ -652,7 +655,7 @@ fun PlayerCoreScreen() {
                                     key = { "s_yt_f_${it.id}" },
                                     contentType = { "track" }
                                 ) { track ->
-                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                     val isPlaying = isCurrent && isPlaybackPlaying
                                     TrackItemRow(
                                         track = track,
@@ -670,13 +673,13 @@ fun PlayerCoreScreen() {
                                         onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                                         onTrackCardClick = {
-                                            playOnlineSafely {
-                                                if (!isCurrent) {
+                                            handleTrackPlayPause(track) {
+                                                playOnlineSafely {
                                                     val idx = youtubeResults.indexOf(track).coerceAtLeast(0)
                                                     viewModel.playQueue(youtubeResults, idx)
                                                 }
-                                                showNowPlayingSheet = true
                                             }
+                                            showNowPlayingSheet = true
                                         }
                                     )
                                 }
@@ -712,7 +715,7 @@ fun PlayerCoreScreen() {
                                     key = { "s_sc_f_${it.id}" },
                                     contentType = { "track" }
                                 ) { track ->
-                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                     val isPlaying = isCurrent && isPlaybackPlaying
                                     TrackItemRow(
                                         track = track,
@@ -730,13 +733,13 @@ fun PlayerCoreScreen() {
                                         onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                         onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                                         onTrackCardClick = {
-                                            playOnlineSafely {
-                                                if (!isCurrent) {
+                                            handleTrackPlayPause(track) {
+                                                playOnlineSafely {
                                                     val idx = soundCloudResults.indexOf(track).coerceAtLeast(0)
                                                     viewModel.playQueue(soundCloudResults, idx)
                                                 }
-                                                showNowPlayingSheet = true
                                             }
+                                            showNowPlayingSheet = true
                                         }
                                     )
                                 }
@@ -838,7 +841,7 @@ fun PlayerCoreScreen() {
                                             key = { "feat_${it.id}" },
                                             contentType = { "featured" }
                                         ) { track ->
-                                            val isCurrent = currentPlayingTrack?.id == track.id
+                                            val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                             val isPlaying = isCurrent && isPlaybackPlaying
                                             FeaturedTrackCard(
                                                 track = track,
@@ -897,7 +900,7 @@ fun PlayerCoreScreen() {
                                     contentType = { "track" }
                                 ) { histItem ->
                                     val track = histItem.toAudioTrack()
-                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                     val isPlaying = isCurrent && isPlaybackPlaying
                                     TrackItemRow(
                                         track = track,
@@ -911,7 +914,7 @@ fun PlayerCoreScreen() {
                                         isPlayingThisTrack = isPlaying,
                                         onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                         onTrackCardClick = {
-                                            if (!isCurrent) {
+                                            handleTrackPlayPause(track) {
                                                 viewModel.playTrack(track)
                                             }
                                             showNowPlayingSheet = true
@@ -1253,7 +1256,7 @@ fun PlayerCoreScreen() {
                                             contentType = { "track" }
                                         ) { track ->
                                             val isSelected = selectedTracks.contains(track)
-                                            val isCurrent = currentPlayingTrack?.id == track.id
+                                            val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                             val isPlaying = isCurrent && isPlaybackPlaying
                                             TrackItemRow(
                                                 track = track,
@@ -1262,7 +1265,7 @@ fun PlayerCoreScreen() {
                                                         selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
                                                     } else {
                                                         handleTrackPlayPause(track) {
-                                                            viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                            viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { areTrackIdsEqual(it.id, track.id) }.coerceAtLeast(0))
                                                         }
                                                     }
                                                 },
@@ -1281,10 +1284,14 @@ fun PlayerCoreScreen() {
                                                     viewModel.loadSimilarTracks(track)
                                                 },
                                                 onTrackCardClick = {
-                                                    if (!isCurrent) {
-                                                        viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                    if (isMultiSelectMode) {
+                                                        selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
+                                                    } else {
+                                                        handleTrackPlayPause(track) {
+                                                            viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { areTrackIdsEqual(it.id, track.id) }.coerceAtLeast(0))
+                                                        }
+                                                        showNowPlayingSheet = true
                                                     }
-                                                    showNowPlayingSheet = true
                                                 }
                                             )
                                         }
@@ -1408,13 +1415,13 @@ fun PlayerCoreScreen() {
                                             key = { "fav_${it.id}" },
                                             contentType = { "track" }
                                         ) { track ->
-                                            val isCurrent = currentPlayingTrack?.id == track.id
+                                            val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
                                             val isPlaying = isCurrent && isPlaybackPlaying
                                             TrackItemRow(
                                                 track = track,
                                                 onPlay = {
                                                     handleTrackPlayPause(track) {
-                                                        viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                        viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { areTrackIdsEqual(it.id, track.id) }.coerceAtLeast(0))
                                                     }
                                                 },
                                                 isFavorite = true,
@@ -1427,8 +1434,8 @@ fun PlayerCoreScreen() {
                                                     viewModel.loadSimilarTracks(track)
                                                 },
                                                 onTrackCardClick = {
-                                                    if (!isCurrent) {
-                                                        viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                    handleTrackPlayPause(track) {
+                                                        viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { areTrackIdsEqual(it.id, track.id) }.coerceAtLeast(0))
                                                     }
                                                     showNowPlayingSheet = true
                                                 }

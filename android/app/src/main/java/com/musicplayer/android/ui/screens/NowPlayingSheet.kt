@@ -58,6 +58,7 @@ import coil.compose.SubcomposeAsyncImage
 import com.musicplayer.android.R
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.PlaybackState
+import com.musicplayer.android.core.audio.areTrackIdsEqual
 import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 import com.musicplayer.android.ui.components.TrackArtwork
 import com.musicplayer.android.ui.components.formatTrackDuration
@@ -91,13 +92,13 @@ fun NowPlayingSheet(
         if (playbackState.currentTrack != null) playbackState.currentPositionMs.toFloat()
         else (lastSession?.second ?: 0L).toFloat()
     )
-    val isFav = localFavorites.any { it.id == activeTrack.id }
+    val isFav = localFavorites.any { areTrackIdsEqual(it.id, activeTrack.id) }
 
     // Queue for carousel navigation
     val currentQueue = remember(playbackState.queue, activeTrack) {
         if (playbackState.queue.isNotEmpty()) playbackState.queue else listOf(activeTrack)
     }
-    val activeTrackIndex = currentQueue.indexOfFirst { it.id == activeTrack.id }.coerceAtLeast(0)
+    val activeTrackIndex = currentQueue.indexOfFirst { areTrackIdsEqual(it.id, activeTrack.id) }.coerceAtLeast(0)
     val upcomingQueueTracks = remember(currentQueue, activeTrackIndex) {
         if (activeTrackIndex in currentQueue.indices && activeTrackIndex < currentQueue.lastIndex) {
             currentQueue.drop(activeTrackIndex + 1)
@@ -148,8 +149,8 @@ fun NowPlayingSheet(
             val prevId = lastTrackId
             lastTrackId = activeTrack.id
             if (isShuffle && currentQueue.size > 1 && prevId.isNotBlank()) {
-                val prevTrack = currentQueue.firstOrNull { it.id == prevId } ?: activeTrack
-                val pool = currentQueue.filter { it.id != activeTrack.id && it.id != prevTrack.id }
+                val prevTrack = currentQueue.firstOrNull { areTrackIdsEqual(it.id, prevId) } ?: activeTrack
+                val pool = currentQueue.filter { !areTrackIdsEqual(it.id, activeTrack.id) && !areTrackIdsEqual(it.id, prevTrack.id) }
                 val intermediate = if (pool.size >= 2) {
                     pool.shuffled().take(2)
                 } else if (pool.isNotEmpty()) {
@@ -203,11 +204,14 @@ fun NowPlayingSheet(
     }
 
     // Sync playback when user swipes to a different track in carousel (only when shuffle is off)
-    LaunchedEffect(pagerState.currentPage) {
-        if (!isShuffle) {
-            val selectedTrack = currentQueue.getOrNull(pagerState.currentPage)
-            if (selectedTrack != null && selectedTrack.id != activeTrack.id) {
-                viewModel.playTrack(selectedTrack)
+    LaunchedEffect(pagerState.settledPage) {
+        if (!isShuffle && !isShufflingAnimation) {
+            val settledIndex = pagerState.settledPage
+            if (settledIndex in currentQueue.indices && settledIndex != activeTrackIndex) {
+                val selectedTrack = currentQueue[settledIndex]
+                if (!areTrackIdsEqual(selectedTrack.id, activeTrack.id)) {
+                    viewModel.playTrack(selectedTrack)
+                }
             }
         }
     }

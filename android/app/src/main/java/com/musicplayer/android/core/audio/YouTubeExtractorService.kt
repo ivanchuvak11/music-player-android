@@ -88,23 +88,25 @@ object YouTubeExtractorService {
     private val prefetchScope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + prefetchJob)
 
     /**
-     * Pre-resolves audio stream URLs for upcoming tracks in the queue in background.
+     * Pre-resolves audio stream URLs for upcoming tracks in background concurrently.
      * When user skips or track transitions, playback starts with 0ms delay!
      */
     fun prefetchNextTracks(videoIds: List<String>) {
         if (videoIds.isEmpty()) return
         prefetchScope.launch {
-            for (id in videoIds.take(3)) {
-                val cleanId = id.trim().removePrefix("youtube_")
-                if (cleanId.isNotBlank()) {
-                    val now = System.currentTimeMillis()
-                    val cached = streamCache[cleanId]
-                    if (cached == null || now >= cached.expiresAt - 300_000L) {
-                        try {
-                            Log.d(TAG, "Prefetching audio stream for upcoming track: videoId=$cleanId")
-                            resolveAudioStreamUrlSync(cleanId)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Prefetch failed for $cleanId: ${e.message}")
+            videoIds.take(4).forEach { id ->
+                launch {
+                    val cleanId = id.trim().removePrefix("youtube_")
+                    if (cleanId.isNotBlank()) {
+                        val now = System.currentTimeMillis()
+                        val cached = streamCache[cleanId]
+                        if (cached == null || now >= cached.expiresAt - 300_000L) {
+                            try {
+                                Log.d(TAG, "Prefetching audio stream for track: videoId=$cleanId")
+                                resolveAudioStreamUrlSync(cleanId)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Prefetch failed for $cleanId: ${e.message}")
+                            }
                         }
                     }
                 }

@@ -241,7 +241,7 @@ class PlayerControllerImpl(
         val controller = mediaController ?: return
         val currentMediaItem = controller.currentMediaItem
         val currentTrack = currentMediaItem?.let { item ->
-            currentQueue.find { it.id == item.mediaId }
+            currentQueue.find { areTrackIdsEqual(it.id, item.mediaId) }
                 ?: AudioTrack.fromMediaItem(item, controller.duration.coerceAtLeast(0L))
         }
 
@@ -271,44 +271,17 @@ class PlayerControllerImpl(
         fadeJob?.cancel()
         retryJob?.cancel()
         retryJob = null
-        _playbackState.value = _playbackState.value.copy(errorMessage = null)
-        fadeJob = scope.launch {
-            try {
-                controller.volume = 0.6f
-                controller.play()
-                val steps = 2
-                val stepDelay = 20L
-                for (i in 1..steps) {
-                    delay(stepDelay)
-                    controller.volume = 0.6f + (0.4f * i / steps)
-                }
-                controller.volume = 1.0f
-            } catch (e: Exception) {
-                controller.play()
-                controller.volume = 1.0f
-            }
-        }
+        _playbackState.value = _playbackState.value.copy(isPlaying = true, errorMessage = null)
+        controller.play()
+        updateState()
     }
 
     override fun pause() {
         val controller = mediaController ?: return
         fadeJob?.cancel()
-        fadeJob = scope.launch {
-            try {
-                val steps = 2
-                val stepDelay = 20L
-                for (i in (steps - 1) downTo 0) {
-                    controller.volume = i.toFloat() / steps
-                    delay(stepDelay)
-                }
-                // Fix #4: Reset volume AFTER pause so there is no audio left to pop
-                controller.pause()
-                controller.volume = 1.0f
-            } catch (e: Exception) {
-                controller.pause()
-                controller.volume = 1.0f
-            }
-        }
+        _playbackState.value = _playbackState.value.copy(isPlaying = false)
+        controller.pause()
+        updateState()
     }
 
     override fun playNext() {
@@ -345,6 +318,7 @@ class PlayerControllerImpl(
     }
 
     override fun setQueue(tracks: List<AudioTrack>, startIndex: Int, autoPlay: Boolean) {
+        val previousQueue = currentQueue
         currentQueue = tracks
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
         if (tracks.isEmpty()) {
@@ -355,23 +329,48 @@ class PlayerControllerImpl(
         }
 
         val safeStartIndex = startIndex.coerceIn(0, tracks.lastIndex)
-        val mediaItems = tracks.map { it.toMediaItem() }
+        val targetTrack = tracks[safeStartIndex]
         val controller = mediaController
-        val startPos = pendingSeekPositionMs ?: 0L
+        val explicitStartPos = pendingSeekPositionMs
+        pendingSeekPositionMs = null
+
         if (controller == null) {
-            // Fix #3: Store for replay when controller becomes available
-            pendingQueue = PendingQueue(tracks, safeStartIndex, autoPlay, startPos)
+            pendingQueue = PendingQueue(tracks, safeStartIndex, autoPlay, explicitStartPos ?: 0L)
             return
         }
-        pendingSeekPositionMs = null
-        controller.setMediaItems(mediaItems, safeStartIndex, startPos)
+
+        val currentMediaItem = controller.currentMediaItem
+        val isAlreadyTargetTrack = currentMediaItem != null && areTrackIdsEqual(currentMediaItem.mediaId, targetTrack.id)
+
+        // Check if queue has identical tracks
+        val isSameQueue = previousQueue.size == tracks.size &&
+                previousQueue.zip(tracks).all { areTrackIdsEqual(it.first.id, it.second.id) }
+
+        if (isAlreadyTargetTrack && explicitStartPos == null) {
+            if (isSameQueue) {
+                // Same track and queue already loaded: toggle play/pause instead of rewinding to 0ms
+                if (controller.isPlaying) {
+                    pause()
+                } else {
+                    play()
+                }
+                updateState()
+                return
+            }
+        }
+
+        val mediaItems = tracks.map { it.toMediaItem() }
+        // If track is already loaded but queue changed, retain current position instead of jumping to 0:00
+        val actualStartPos = explicitStartPos ?: if (isAlreadyTargetTrack) controller.currentPosition.coerceAtLeast(0L) else 0L
+
+        controller.setMediaItems(mediaItems, safeStartIndex, actualStartPos)
         controller.prepare()
         if (autoPlay) {
             controller.play()
         }
         updateState()
 
-        val upcoming = tracks.drop(safeStartIndex + 1).take(3)
+        val upcoming = tracks.drop(safeStartIndex).take(4)
         val upcomingIds = upcoming.map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
         YouTubeExtractorService.prefetchNextTracks(upcomingIds)
     }
@@ -381,7 +380,7 @@ class PlayerControllerImpl(
         if (startPositionMs > 0L) {
             pendingSeekPositionMs = startPositionMs
         }
-        val existingIndex = currentQueue.indexOfFirst { it.id == track.id }
+        val existingIndex = currentQueue.indexOfFirst { areTrackIdsEqual(it.id, track.id) }
         if (existingIndex >= 0) {
             val controller = mediaController
             val pos = pendingSeekPositionMs ?: 0L
@@ -390,12 +389,26 @@ class PlayerControllerImpl(
                 // The queue is known locally, but the MediaController is still connecting.
                 pendingQueue = PendingQueue(currentQueue, existingIndex, autoPlay = true, startPositionMs = pos)
             } else {
-                if (pos > 0L) {
-                    controller.seekTo(existingIndex, pos)
+                val currentMediaItem = controller.currentMediaItem
+                val isCurrentlyActive = currentMediaItem != null &&
+                        (controller.currentMediaItemIndex == existingIndex || areTrackIdsEqual(currentMediaItem.mediaId, track.id))
+
+                if (isCurrentlyActive && pos == 0L) {
+                    // Track is already loaded as current track and no explicit seek requested:
+                    // Toggle play/pause instead of seeking to 0ms and restarting from beginning!
+                    if (controller.isPlaying) {
+                        pause()
+                    } else {
+                        play()
+                    }
                 } else {
-                    controller.seekToDefaultPosition(existingIndex)
+                    if (pos > 0L) {
+                        controller.seekTo(existingIndex, pos)
+                    } else {
+                        controller.seekToDefaultPosition(existingIndex)
+                    }
+                    play()
                 }
-                play()
                 updateState()
             }
         } else {

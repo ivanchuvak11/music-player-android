@@ -11,6 +11,7 @@ import com.musicplayer.android.core.audio.LocalAudioScanner
 import com.musicplayer.android.core.audio.PlaybackState
 import com.musicplayer.android.core.audio.PlayerController
 import com.musicplayer.android.core.audio.PlayerControllerImpl
+import com.musicplayer.android.core.audio.areTrackIdsEqual
 import com.musicplayer.android.core.audio.mergeYouTubeSearchResults
 import com.musicplayer.android.core.audio.shouldSupplementYouTubeSearch
 import com.musicplayer.android.core.audio.toAudioTrack
@@ -713,10 +714,20 @@ class MainPlayerViewModel(
     fun getBaseUrl(): String = sessionManager.getBaseUrl()
 
     fun playTrack(track: AudioTrack) {
+        val currentTrack = playbackState.value.currentTrack
+        if (currentTrack != null && areTrackIdsEqual(track.id, currentTrack.id)) {
+            if (playbackState.value.isPlaying) {
+                pause()
+            } else {
+                play()
+            }
+            return
+        }
+
         // If the track belongs to local favorites and current queue doesn't contain it, play the favorites queue
         val favs = localFavorites.value
-        val favIndex = favs.indexOfFirst { it.id == track.id }
-        if (favIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { it.id == track.id })) {
+        val favIndex = favs.indexOfFirst { areTrackIdsEqual(it.id, track.id) }
+        if (favIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { areTrackIdsEqual(it.id, track.id) })) {
             val favTracks = favs.map { it.toAudioTrack() }
             playQueue(favTracks, favIndex)
             return
@@ -724,8 +735,8 @@ class MainPlayerViewModel(
 
         // If the track is among local tracks and queue is empty, play local tracks queue
         val locals = _localTracks.value
-        val localIndex = locals.indexOfFirst { it.id == track.id }
-        if (localIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { it.id == track.id })) {
+        val localIndex = locals.indexOfFirst { areTrackIdsEqual(it.id, track.id) }
+        if (localIndex >= 0 && (playbackState.value.queue.isEmpty() || playbackState.value.queue.none { areTrackIdsEqual(it.id, track.id) })) {
             playQueue(locals, localIndex)
             return
         }
@@ -734,9 +745,18 @@ class MainPlayerViewModel(
     }
 
     fun playLocalTrack(track: AudioTrack) {
+        val currentTrack = playbackState.value.currentTrack
+        if (currentTrack != null && areTrackIdsEqual(track.id, currentTrack.id)) {
+            if (playbackState.value.isPlaying) {
+                pause()
+            } else {
+                play()
+            }
+            return
+        }
         val tracks = _localTracks.value
         if (tracks.isNotEmpty()) {
-            val index = tracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
+            val index = tracks.indexOfFirst { areTrackIdsEqual(it.id, track.id) }.coerceAtLeast(0)
             playQueue(tracks, index)
         } else {
             playTrack(track)
@@ -744,6 +764,16 @@ class MainPlayerViewModel(
     }
 
     fun playQueue(tracks: List<AudioTrack>, startIndex: Int = 0) {
+        val targetTrack = tracks.getOrNull(startIndex)
+        val currentTrack = playbackState.value.currentTrack
+        if (targetTrack != null && currentTrack != null && areTrackIdsEqual(targetTrack.id, currentTrack.id)) {
+            if (playbackState.value.isPlaying) {
+                pause()
+            } else {
+                play()
+            }
+            return
+        }
         playerController.setQueue(tracks, startIndex, autoPlay = true)
     }
 
@@ -1055,6 +1085,8 @@ class MainPlayerViewModel(
 
                 if (tracks.isNotEmpty()) {
                     _trendingOnlineTracks.value = tracks
+                    val upcomingIds = tracks.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -1214,6 +1246,8 @@ class MainPlayerViewModel(
             _searchUiResults.value = _searchUiResults.value.copy(
                 onlineResults = onl
             )
+            val upcomingIds = onl.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
+            com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
         }
     }
 
