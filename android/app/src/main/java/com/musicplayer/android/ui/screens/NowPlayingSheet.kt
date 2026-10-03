@@ -26,6 +26,7 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -111,6 +112,7 @@ fun NowPlayingSheet(
     val wheelProgress = remember { Animatable(0f) }
     val extraSideOffset = remember { Animatable(0f) }
     var showEqualizerDialog by remember { mutableStateOf(false) }
+    var showSimilarTracksDialog by remember { mutableStateOf(false) }
     val audioEffectsState by viewModel.audioEffectsState.collectAsState()
 
     // Smooth 3-phase circular arc roll when track changes under shuffle:
@@ -638,6 +640,25 @@ fun NowPlayingSheet(
                     )
                 }
 
+                // Similar Tracks (Song Radio) quick tool button
+                IconButton(
+                    onClick = {
+                        viewModel.loadSimilarTracks(activeTrack)
+                        showSimilarTracksDialog = true
+                    },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(DarkRefTheme.AccentMint.copy(alpha = 0.12f))
+                        .padding(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = "Схожі пісні",
+                        tint = DarkRefTheme.AccentMint,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
                 IconButton(
                     onClick = { onAddToPlaylist(activeTrack) }
                 ) {
@@ -660,6 +681,14 @@ fun NowPlayingSheet(
                 viewModel = viewModel,
                 audioEffectsState = audioEffectsState,
                 onDismiss = { showEqualizerDialog = false }
+            )
+        }
+
+        if (showSimilarTracksDialog) {
+            SimilarTracksDialog(
+                seedTrack = activeTrack,
+                viewModel = viewModel,
+                onDismiss = { showSimilarTracksDialog = false }
             )
         }
     }

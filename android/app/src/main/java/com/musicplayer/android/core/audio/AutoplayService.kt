@@ -35,8 +35,17 @@ object AutoplayService {
         val backendBase = com.musicplayer.android.core.network.ServerConfig.DEFAULT_LOCAL_BASE_URL
 
         // Strategy 1: YouTube track → use Related Streams from YouTube sidebar
-        if (currentTrack.id.startsWith("youtube_")) {
-            val videoId = currentTrack.id.removePrefix("youtube_")
+        val videoId = if (currentTrack.id.startsWith("youtube_")) {
+            currentTrack.id.removePrefix("youtube_")
+        } else {
+            try {
+                YouTubeExtractorService.extractVideoIdFromUri(android.net.Uri.parse(currentTrack.audioUrl))
+            } catch (e: Exception) {
+                null
+            }
+        }
+
+        if (!videoId.isNullOrBlank()) {
             Log.d(TAG, "Autoplay: fetching related for YouTube videoId=$videoId")
             val related = YouTubeExtractorService.getRelatedTracks(videoId, limit + existingIds.size)
             val filtered = related.filterNot { it.externalId in existingIds || "youtube_${it.externalId}" in existingIds }

@@ -229,13 +229,13 @@ object YouTubeExtractorService {
     }
 
     /**
-     * Extracts YouTube video ID from a playback URI if applicable.
+     * Extracts YouTube video ID from a playback URL string if applicable.
      */
-    fun extractVideoIdFromUri(uri: Uri): String? {
-        val uriString = uri.toString()
+    fun extractVideoIdFromUrl(uriString: String): String? {
+        if (uriString.isBlank()) return null
 
         // 1. If it's already a direct Google Video CDN URL, don't modify
-        if (uri.host?.contains("googlevideo.com") == true) return null
+        if (uriString.contains("googlevideo.com")) return null
 
         // 2. Backend YouTube stream proxy URL: /api/youtube/tracks/{id}/stream
         if (uriString.contains("/api/youtube/tracks/")) {
@@ -245,8 +245,8 @@ object YouTubeExtractorService {
         }
 
         // 3. YouTube custom scheme: youtube://{id} or youtube_{id}
-        if (uri.scheme.equals("youtube", ignoreCase = true)) {
-            val part = uri.schemeSpecificPart.removePrefix("//")
+        if (uriString.startsWith("youtube://", ignoreCase = true)) {
+            val part = uriString.substringAfter("youtube://")
             val videoId = part.substringBefore("/").substringBefore("?").removePrefix("youtube_")
             if (videoId.isNotBlank()) return videoId
         }
@@ -256,16 +256,23 @@ object YouTubeExtractorService {
         }
 
         // 4. Web URLs: youtube.com/watch?v={id} or youtu.be/{id}
-        if (uri.host?.contains("youtube.com") == true) {
-            val vParam = uri.getQueryParameter("v")
-            if (!vParam.isNullOrBlank()) return vParam
+        if (uriString.contains("youtube.com/watch")) {
+            val vParam = uriString.substringAfter("v=", "").substringBefore("&").substringBefore("#")
+            if (vParam.isNotBlank()) return vParam
         }
-        if (uri.host?.contains("youtu.be") == true) {
-            val segment = uri.lastPathSegment
-            if (!segment.isNullOrBlank()) return segment
+        if (uriString.contains("youtu.be/")) {
+            val segment = uriString.substringAfter("youtu.be/").substringBefore("/").substringBefore("?").substringBefore("#")
+            if (segment.isNotBlank()) return segment
         }
 
         return null
+    }
+
+    /**
+     * Extracts YouTube video ID from a playback URI if applicable.
+     */
+    fun extractVideoIdFromUri(uri: Uri): String? {
+        return extractVideoIdFromUrl(uri.toString())
     }
 }
 

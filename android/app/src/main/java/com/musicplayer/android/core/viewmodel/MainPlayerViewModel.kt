@@ -426,6 +426,12 @@ class MainPlayerViewModel(
                 if (similar.isNotEmpty()) {
                     similar.forEach { track -> playerController.addToQueue(track) }
                     android.util.Log.i("Autoplay", "Added ${similar.size} similar tracks to queue")
+                    // If player is ended or reached the end while fetching, advance to the new track
+                    val state = playbackState.value
+                    if (!state.isPlaying && (state.currentPositionMs >= (currentTrack.durationMs - 1500L).coerceAtLeast(0L) || currentTrack.durationMs <= 0L)) {
+                        delay(200)
+                        playerController.playNext()
+                    }
                 } else {
                     android.util.Log.w("Autoplay", "No similar tracks found for ${currentTrack.title}")
                 }
@@ -437,6 +443,124 @@ class MainPlayerViewModel(
                 _isLoadingAutoplay.value = false
             }
         }
+    }
+
+    /**
+     * Triggered when the user explicitly taps "Next" on the last song in the queue.
+     * Fetches similar tracks, appends them to the queue, and immediately advances playback.
+     */
+    fun playNextWithAutoplay(currentTrack: AudioTrack, currentQueue: List<AudioTrack>) {
+        if (currentTrack.isLiveStream) return
+        autoplayJob?.cancel()
+        autoplayJob = viewModelScope.launch {
+            _isLoadingAutoplay.value = true
+            try {
+                val existingIds = currentQueue.map { it.id }.toSet()
+                val similar = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
+                    currentTrack = currentTrack,
+                    existingIds = existingIds,
+                    limit = 15
+                )
+                if (similar.isNotEmpty()) {
+                    similar.forEach { track -> playerController.addToQueue(track) }
+                    android.util.Log.i("Autoplay", "Explicit Next: appended ${similar.size} similar tracks")
+                    delay(200)
+                    playerController.playNext()
+                } else if (currentQueue.size > 1) {
+                    // Loop to start if no similar tracks found
+                    playerController.setQueue(currentQueue, startIndex = 0, autoPlay = true)
+                }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("Autoplay", "Failed to fetch autoplay on Next: ${e.message}")
+                }
+            } finally {
+                _isLoadingAutoplay.value = false
+            }
+        }
+    }
+
+    // ─── Similar Tracks for Any Song (Song Radio / Схожі треки) ────────────────
+    private val _similarTracks = MutableStateFlow<List<AudioTrack>>(emptyList())
+    val similarTracks: StateFlow<List<AudioTrack>> = _similarTracks.asStateFlow()
+
+    private val _isLoadingSimilarTracks = MutableStateFlow(false)
+    val isLoadingSimilarTracks: StateFlow<Boolean> = _isLoadingSimilarTracks.asStateFlow()
+
+    private val _selectedSimilarSeedTrack = MutableStateFlow<AudioTrack?>(null)
+    val selectedSimilarSeedTrack: StateFlow<AudioTrack?> = _selectedSimilarSeedTrack.asStateFlow()
+
+    private var similarTracksJob: Job? = null
+
+    /**
+     * Loads a list of similar tracks for the given seed track to display in UI.
+     */
+    fun loadSimilarTracks(seedTrack: AudioTrack) {
+        _selectedSimilarSeedTrack.value = seedTrack
+        _similarTracks.value = emptyList()
+        similarTracksJob?.cancel()
+        similarTracksJob = viewModelScope.launch {
+            _isLoadingSimilarTracks.value = true
+            try {
+                val results = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
+                    currentTrack = seedTrack,
+                    existingIds = setOf(seedTrack.id),
+                    limit = 20
+                )
+                _similarTracks.value = results
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("Autoplay", "Failed to load similar tracks: ${e.message}")
+                }
+            } finally {
+                _isLoadingSimilarTracks.value = false
+            }
+        }
+    }
+
+    /**
+     * Creates an instant radio queue based on the seed track (seed + 20 similar songs)
+     * and starts playback immediately.
+     */
+    fun playSimilarTracks(seedTrack: AudioTrack) {
+        viewModelScope.launch {
+            _isLoadingSimilarTracks.value = true
+            try {
+                val results = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
+                    currentTrack = seedTrack,
+                    existingIds = setOf(seedTrack.id),
+                    limit = 20
+                )
+                if (results.isNotEmpty()) {
+                    val fullQueue = listOf(seedTrack) + results
+                    playQueue(fullQueue, startIndex = 0)
+                } else {
+                    playTrack(seedTrack)
+                }
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("Autoplay", "Failed to play similar mix: ${e.message}")
+                }
+                playTrack(seedTrack)
+            } finally {
+                _isLoadingSimilarTracks.value = false
+            }
+        }
+    }
+
+    /**
+     * Appends all currently loaded similar tracks to the current playback queue.
+     */
+    fun addLoadedSimilarTracksToQueue() {
+        val tracks = _similarTracks.value
+        if (tracks.isNotEmpty()) {
+            tracks.forEach { playerController.addToQueue(it) }
+        }
+    }
+
+    fun clearSimilarTracks() {
+        _selectedSimilarSeedTrack.value = null
+        _similarTracks.value = emptyList()
     }
 
     /** Toggle the Autoplay setting and persist it. */
@@ -497,6 +621,18 @@ class MainPlayerViewModel(
                 val currentIndex = stations.indexOfFirst { it.name == current.title }
                 val nextIndex = if (currentIndex >= 0) (currentIndex + 1) % stations.size else 0
                 playRadioStation(stations[nextIndex])
+                return
+            }
+        }
+        val state = playbackState.value
+        // When user taps "Next" on the last song in queue, trigger instant Autoplay extension
+        if (!state.hasNext) {
+            if (state.repeatMode == PlaybackState.REPEAT_MODE_ALL && state.queue.isNotEmpty()) {
+                playerController.setQueue(state.queue, startIndex = 0, autoPlay = true)
+                return
+            }
+            if (current != null && !current.isLiveStream) {
+                playNextWithAutoplay(current, state.queue)
                 return
             }
         }

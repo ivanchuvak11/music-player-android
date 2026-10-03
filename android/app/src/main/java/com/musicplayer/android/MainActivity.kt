@@ -154,6 +154,7 @@ fun PlayerCoreScreen() {
     var showEqualizerDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var showNowPlayingSheet by remember { mutableStateOf(false) }
+    var similarTracksSeedTrack by remember { mutableStateOf<AudioTrack?>(null) }
     var tracksToAddToPlaylist by remember { mutableStateOf<List<AudioTrack>?>(null) }
 
     // Search and Selection States
@@ -375,6 +376,10 @@ fun PlayerCoreScreen() {
                                 isPlayingThisTrack = currentPlayingTrack?.id == track.id,
                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                 onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                onPlaySimilar = {
+                                    similarTracksSeedTrack = track
+                                    viewModel.loadSimilarTracks(track)
+                                },
                                 onTrackCardClick = {
                                     if (currentPlayingTrack?.id != track.id) {
                                         viewModel.playLocalTrack(track)
@@ -411,6 +416,10 @@ fun PlayerCoreScreen() {
                                 isPlayingThisTrack = currentPlayingTrack?.id == track.id,
                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                 onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                onPlaySimilar = {
+                                    similarTracksSeedTrack = track
+                                    viewModel.loadSimilarTracks(track)
+                                },
                                 onTrackCardClick = {
                                     playOnlineSafely {
                                         if (currentPlayingTrack?.id != track.id) {
@@ -912,6 +921,10 @@ fun PlayerCoreScreen() {
                                                     selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
                                                 },
                                                 onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                                onPlaySimilar = {
+                                                    similarTracksSeedTrack = track
+                                                    viewModel.loadSimilarTracks(track)
+                                                },
                                                 onTrackCardClick = {
                                                     if (currentPlayingTrack?.id != track.id) {
                                                         viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
@@ -1049,6 +1062,10 @@ fun PlayerCoreScreen() {
                                                 isPlayingThisTrack = currentPlayingTrack?.id == track.id,
                                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                                 onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                                onPlaySimilar = {
+                                                    similarTracksSeedTrack = track
+                                                    viewModel.loadSimilarTracks(track)
+                                                },
                                                 onTrackCardClick = {
                                                     if (currentPlayingTrack?.id != track.id) {
                                                         viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
@@ -1496,6 +1513,14 @@ fun PlayerCoreScreen() {
             localPlaylists = localPlaylists,
             viewModel = viewModel,
             onDismiss = { tracksToAddToPlaylist = null }
+        )
+    }
+
+    if (similarTracksSeedTrack != null) {
+        SimilarTracksDialog(
+            seedTrack = similarTracksSeedTrack!!,
+            viewModel = viewModel,
+            onDismiss = { similarTracksSeedTrack = null }
         )
     }
 }

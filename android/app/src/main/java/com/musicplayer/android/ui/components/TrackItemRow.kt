@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -35,6 +36,7 @@ fun TrackItemRow(
     onToggleFavorite: (() -> Unit)? = null,
     onToggleSelect: (() -> Unit)? = null,
     onAddToPlaylist: (() -> Unit)? = null,
+    onPlaySimilar: (() -> Unit)? = null,
     onTrackCardClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -125,6 +127,21 @@ fun TrackItemRow(
                         imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         contentDescription = "Favorite",
                         tint = if (isFavorite) DarkRefTheme.AccentPink else DarkRefTheme.TextSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            // Similar Tracks (Song Radio) Button
+            if (onPlaySimilar != null) {
+                IconButton(
+                    onClick = onPlaySimilar,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = "Схожі пісні",
+                        tint = DarkRefTheme.AccentMint.copy(alpha = 0.85f),
                         modifier = Modifier.size(20.dp)
                     )
                 }
