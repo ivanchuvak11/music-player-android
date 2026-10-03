@@ -381,10 +381,12 @@ class MainPlayerViewModel(
                 val isNearEnd = (state.durationMs > 0L && state.currentPositionMs >= (state.durationMs - 20_000L)) ||
                     (state.durationMs <= 0L && state.currentPositionMs >= 25_000L)
 
-                // Trigger fetch 20 seconds before the last track ends for gapless Spotify-like continuation
+                // Trigger fetch 20 seconds before the last track ends for gapless Spotify-like continuation,
+                // or if it already reached the end (currentPositionMs near durationMs or ended).
+                val isAtEnd = (state.durationMs > 0L && state.currentPositionMs >= (state.durationMs - 2_000L))
                 if (autoplayOn && repeatOff && !state.hasNext &&
                     !track.isLiveStream &&
-                    state.isPlaying && isNearEnd &&
+                    (state.isPlaying || isAtEnd) && (isNearEnd || isAtEnd) &&
                     track.id != lastAutoplayTriggeredForTrackId &&
                     autoplayJob?.isActive != true
                 ) {

@@ -132,6 +132,24 @@ class PlayerControllerImpl(
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateState()
+                if (playbackState == Player.STATE_ENDED) {
+                    val controller = mediaController
+                    if (controller != null) {
+                        if (controller.hasNextMediaItem()) {
+                            controller.seekToNextMediaItem()
+                            controller.play()
+                        } else if (currentQueue.isNotEmpty()) {
+                            val activeMediaId = controller.currentMediaItem?.mediaId
+                            val currentIndex = currentQueue.indexOfFirst { areTrackIdsEqual(it.id, activeMediaId) }
+                            if (currentIndex in 0 until currentQueue.lastIndex) {
+                                // Next item exists in queue: advance and play
+                                setQueue(currentQueue, startIndex = currentIndex + 1, autoPlay = true)
+                            } else if (controller.repeatMode == Player.REPEAT_MODE_ALL && currentQueue.isNotEmpty()) {
+                                setQueue(currentQueue, startIndex = 0, autoPlay = true)
+                            }
+                        }
+                    }
+                }
             }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
