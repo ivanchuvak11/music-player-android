@@ -5,6 +5,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,10 +13,12 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -41,6 +44,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -61,6 +65,13 @@ import com.musicplayer.android.core.viewmodel.MainPlayerViewModel
 import com.musicplayer.android.ui.components.*
 import com.musicplayer.android.ui.screens.*
 import com.musicplayer.android.ui.theme.DarkRefTheme
+
+enum class SearchSourceFilter(val label: String) {
+    ALL("Загально"),
+    LOCAL("На пристрої"),
+    YOUTUBE("YouTube Music"),
+    SOUNDCLOUD("SoundCloud")
+}
 
 enum class LibrarySubTab {
     ON_DEVICE,
@@ -156,6 +167,7 @@ fun PlayerCoreScreen() {
 
     // Search and Selection States
     var unifiedSearchQuery by remember { mutableStateOf("") }
+    var searchSourceFilter by remember { mutableStateOf(SearchSourceFilter.ALL) }
     var isMultiSelectMode by remember { mutableStateOf(false) }
     var selectedTracks by remember { mutableStateOf(setOf<AudioTrack>()) }
     var currentRadioIndex by remember { mutableStateOf(0) }
@@ -252,6 +264,22 @@ fun PlayerCoreScreen() {
         }
     }
 
+    val handleTrackPlayPause: (AudioTrack, () -> Unit) -> Unit = { track, defaultStartQueue ->
+        if (currentPlayingTrack?.id == track.id) {
+            if (isPlaybackPlaying) viewModel.pause() else viewModel.play()
+        } else {
+            defaultStartQueue()
+        }
+    }
+
+    val focusManager = LocalFocusManager.current
+
+    BackHandler(enabled = unifiedSearchQuery.isNotEmpty()) {
+        unifiedSearchQuery = ""
+        searchSourceFilter = SearchSourceFilter.ALL
+        focusManager.clearFocus()
+    }
+
     val lastSession = remember { viewModel.getLastPlayedTrack() }
     val rememberedTrack = lastSession?.first
     val rememberedPosition = lastSession?.second ?: 0L
@@ -278,6 +306,23 @@ fun PlayerCoreScreen() {
                 val filteredLocal = searchUiResults.localTracks
                 val filteredCached = searchUiResults.cachedTracks
                 val onlineResults = searchUiResults.onlineResults
+
+                val allLocalResults = remember(filteredLocal, filteredCached) {
+                    (filteredLocal + filteredCached).distinctBy { it.id }
+                }
+                val youtubeResults = remember(onlineResults) {
+                    onlineResults.filter { it.id.startsWith("youtube_") }
+                }
+                val soundCloudResults = remember(onlineResults) {
+                    onlineResults.filter { it.id.startsWith("soundcloud_") }
+                }
+
+                val currentDisplayCount = when (searchSourceFilter) {
+                    SearchSourceFilter.ALL -> filteredLocal.size + filteredCached.size + onlineResults.size
+                    SearchSourceFilter.LOCAL -> allLocalResults.size
+                    SearchSourceFilter.YOUTUBE -> youtubeResults.size
+                    SearchSourceFilter.SOUNDCLOUD -> soundCloudResults.size
+                }
 
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -343,82 +388,366 @@ fun PlayerCoreScreen() {
                         }
                     }
 
-                    item(key = "search_summary") {
-                        Text(
-                            text = "Знайдено: ${filteredLocal.size + filteredCached.size + onlineResults.size}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Color.White
-                        )
+                    item(key = "search_summary_and_filters") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Знайдено: $currentDisplayCount",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = Color.White
+                            )
+
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                SearchFilterChip(
+                                    label = "Загально",
+                                    isSelected = searchSourceFilter == SearchSourceFilter.ALL,
+                                    selectedBgColor = DarkRefTheme.AccentMint,
+                                    selectedTextColor = DarkRefTheme.BackgroundDark,
+                                    unselectedBorderColor = Color.White.copy(alpha = 0.18f),
+                                    unselectedTextColor = DarkRefTheme.TextSecondary,
+                                    onClick = { searchSourceFilter = SearchSourceFilter.ALL }
+                                )
+
+                                SearchFilterChip(
+                                    label = "На пристрої",
+                                    isSelected = searchSourceFilter == SearchSourceFilter.LOCAL,
+                                    selectedBgColor = Color(0xFFFFD54F),
+                                    selectedTextColor = Color(0xFF261D00),
+                                    unselectedBorderColor = Color(0xFFFFD54F).copy(alpha = 0.45f),
+                                    unselectedTextColor = Color(0xFFFFD54F),
+                                    onClick = { searchSourceFilter = SearchSourceFilter.LOCAL }
+                                )
+
+                                SearchFilterChip(
+                                    label = "YouTube Music",
+                                    isSelected = searchSourceFilter == SearchSourceFilter.YOUTUBE,
+                                    selectedBgColor = Color(0xFFFF4E4E),
+                                    selectedTextColor = Color.White,
+                                    unselectedBorderColor = Color(0xFFFF4E4E).copy(alpha = 0.45f),
+                                    unselectedTextColor = Color(0xFFFF6B6B),
+                                    onClick = { searchSourceFilter = SearchSourceFilter.YOUTUBE }
+                                )
+
+                                SearchFilterChip(
+                                    label = "SoundCloud",
+                                    isSelected = searchSourceFilter == SearchSourceFilter.SOUNDCLOUD,
+                                    selectedBgColor = Color(0xFFFF7700),
+                                    selectedTextColor = Color.White,
+                                    unselectedBorderColor = Color(0xFFFF7700).copy(alpha = 0.45f),
+                                    unselectedTextColor = Color(0xFFFF9436),
+                                    onClick = { searchSourceFilter = SearchSourceFilter.SOUNDCLOUD }
+                                )
+                            }
+                        }
                     }
 
-                    if (filteredLocal.isNotEmpty()) {
-                        item(key = "search_header_local") {
-                            Text(
-                                text = "${stringResource(R.string.header_on_device)} (${filteredLocal.size}):",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = DarkRefTheme.TextSecondary
-                            )
-                        }
-                        items(
-                            items = filteredLocal,
-                            key = { "s_loc_${it.id}" },
-                            contentType = { "track" }
-                        ) { track ->
-                            TrackItemRow(
-                                track = track,
-                                onPlay = { viewModel.playLocalTrack(track) },
-                                isFavorite = track.id in favoriteTrackIds,
-                                isPlayingThisTrack = currentPlayingTrack?.id == track.id,
-                                onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
-                                onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
-                                onTrackCardClick = {
-                                    if (currentPlayingTrack?.id != track.id) {
-                                        viewModel.playLocalTrack(track)
-                                    }
-                                    showNowPlayingSheet = true
+                    when (searchSourceFilter) {
+                        SearchSourceFilter.ALL -> {
+                            if (filteredLocal.isNotEmpty()) {
+                                item(key = "search_header_local") {
+                                    Text(
+                                        text = "${stringResource(R.string.header_on_device)} (${filteredLocal.size}):",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = DarkRefTheme.TextSecondary
+                                    )
                                 }
-                            )
-                        }
-                    }
-
-                    if (onlineResults.isNotEmpty()) {
-                        item(key = "search_header_online") {
-                            Text(
-                                text = "🌐 ${stringResource(R.string.tab_online)} (${onlineResults.size}):",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = DarkRefTheme.TextSecondary
-                            )
-                        }
-                        items(
-                            items = onlineResults,
-                            key = { "s_onl_${it.id}" },
-                            contentType = { "track" }
-                        ) { track ->
-                            TrackItemRow(
-                                track = track,
-                                onPlay = {
-                                    playOnlineSafely {
-                                        val idx = onlineResults.indexOf(track).coerceAtLeast(0)
-                                        viewModel.playQueue(onlineResults, idx)
-                                    }
-                                },
-                                isFavorite = track.id in favoriteTrackIds,
-                                isPlayingThisTrack = currentPlayingTrack?.id == track.id,
-                                onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
-                                onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
-                                onTrackCardClick = {
-                                    playOnlineSafely {
-                                        if (currentPlayingTrack?.id != track.id) {
-                                            val idx = onlineResults.indexOf(track).coerceAtLeast(0)
-                                            viewModel.playQueue(onlineResults, idx)
+                                items(
+                                    items = filteredLocal,
+                                    key = { "s_loc_${it.id}" },
+                                    contentType = { "track" }
+                                ) { track ->
+                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isPlaying = isCurrent && isPlaybackPlaying
+                                    TrackItemRow(
+                                        track = track,
+                                        onPlay = {
+                                            handleTrackPlayPause(track) {
+                                                viewModel.playLocalTrack(track)
+                                            }
+                                        },
+                                        isFavorite = track.id in favoriteTrackIds,
+                                        isCurrentTrack = isCurrent,
+                                        isPlayingThisTrack = isPlaying,
+                                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                        onTrackCardClick = {
+                                            if (!isCurrent) {
+                                                viewModel.playLocalTrack(track)
+                                            }
+                                            showNowPlayingSheet = true
                                         }
-                                        showNowPlayingSheet = true
+                                    )
+                                }
+                            }
+
+                            if (filteredCached.isNotEmpty()) {
+                                item(key = "search_header_cached") {
+                                    Text(
+                                        text = "💾 Кешовані треки (${filteredCached.size}):",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = DarkRefTheme.TextSecondary
+                                    )
+                                }
+                                items(
+                                    items = filteredCached,
+                                    key = { "s_cac_${it.id}" },
+                                    contentType = { "track" }
+                                ) { track ->
+                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isPlaying = isCurrent && isPlaybackPlaying
+                                    TrackItemRow(
+                                        track = track,
+                                        onPlay = {
+                                            handleTrackPlayPause(track) {
+                                                viewModel.playLocalTrack(track)
+                                            }
+                                        },
+                                        isFavorite = track.id in favoriteTrackIds,
+                                        isCurrentTrack = isCurrent,
+                                        isPlayingThisTrack = isPlaying,
+                                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                        onTrackCardClick = {
+                                            if (!isCurrent) {
+                                                viewModel.playLocalTrack(track)
+                                            }
+                                            showNowPlayingSheet = true
+                                        }
+                                    )
+                                }
+                            }
+
+                            if (onlineResults.isNotEmpty()) {
+                                item(key = "search_header_online") {
+                                    Text(
+                                        text = "🌐 ${stringResource(R.string.tab_online)} (${onlineResults.size}):",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = DarkRefTheme.TextSecondary
+                                    )
+                                }
+                                items(
+                                    items = onlineResults,
+                                    key = { "s_onl_${it.id}" },
+                                    contentType = { "track" }
+                                ) { track ->
+                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isPlaying = isCurrent && isPlaybackPlaying
+                                    TrackItemRow(
+                                        track = track,
+                                        onPlay = {
+                                            handleTrackPlayPause(track) {
+                                                playOnlineSafely {
+                                                    val idx = onlineResults.indexOf(track).coerceAtLeast(0)
+                                                    viewModel.playQueue(onlineResults, idx)
+                                                }
+                                            }
+                                        },
+                                        isFavorite = track.id in favoriteTrackIds,
+                                        isCurrentTrack = isCurrent,
+                                        isPlayingThisTrack = isPlaying,
+                                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                        onTrackCardClick = {
+                                            playOnlineSafely {
+                                                if (!isCurrent) {
+                                                    val idx = onlineResults.indexOf(track).coerceAtLeast(0)
+                                                    viewModel.playQueue(onlineResults, idx)
+                                                }
+                                                showNowPlayingSheet = true
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        SearchSourceFilter.LOCAL -> {
+                            if (allLocalResults.isNotEmpty()) {
+                                item(key = "search_header_local_filtered") {
+                                    Text(
+                                        text = "${stringResource(R.string.header_on_device)} (${allLocalResults.size}):",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFFFD54F)
+                                    )
+                                }
+                                items(
+                                    items = allLocalResults,
+                                    key = { "s_loc_f_${it.id}" },
+                                    contentType = { "track" }
+                                ) { track ->
+                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isPlaying = isCurrent && isPlaybackPlaying
+                                    TrackItemRow(
+                                        track = track,
+                                        onPlay = {
+                                            handleTrackPlayPause(track) {
+                                                viewModel.playQueue(allLocalResults, allLocalResults.indexOf(track).coerceAtLeast(0))
+                                            }
+                                        },
+                                        isFavorite = track.id in favoriteTrackIds,
+                                        isCurrentTrack = isCurrent,
+                                        isPlayingThisTrack = isPlaying,
+                                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                        onTrackCardClick = {
+                                            if (!isCurrent) {
+                                                viewModel.playQueue(allLocalResults, allLocalResults.indexOf(track).coerceAtLeast(0))
+                                            }
+                                            showNowPlayingSheet = true
+                                        }
+                                    )
+                                }
+                            } else {
+                                item(key = "search_empty_local") {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "На пристрої не знайдено треків за запитом «$unifiedSearchQuery»",
+                                            color = DarkRefTheme.TextSecondary,
+                                            fontSize = 13.sp,
+                                            textAlign = TextAlign.Center
+                                        )
                                     }
                                 }
-                            )
+                            }
+                        }
+
+                        SearchSourceFilter.YOUTUBE -> {
+                            if (youtubeResults.isNotEmpty()) {
+                                item(key = "search_header_yt_filtered") {
+                                    Text(
+                                        text = "YouTube Music (${youtubeResults.size}):",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFFF6B6B)
+                                    )
+                                }
+                                items(
+                                    items = youtubeResults,
+                                    key = { "s_yt_f_${it.id}" },
+                                    contentType = { "track" }
+                                ) { track ->
+                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isPlaying = isCurrent && isPlaybackPlaying
+                                    TrackItemRow(
+                                        track = track,
+                                        onPlay = {
+                                            handleTrackPlayPause(track) {
+                                                playOnlineSafely {
+                                                    val idx = youtubeResults.indexOf(track).coerceAtLeast(0)
+                                                    viewModel.playQueue(youtubeResults, idx)
+                                                }
+                                            }
+                                        },
+                                        isFavorite = track.id in favoriteTrackIds,
+                                        isCurrentTrack = isCurrent,
+                                        isPlayingThisTrack = isPlaying,
+                                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                        onTrackCardClick = {
+                                            playOnlineSafely {
+                                                if (!isCurrent) {
+                                                    val idx = youtubeResults.indexOf(track).coerceAtLeast(0)
+                                                    viewModel.playQueue(youtubeResults, idx)
+                                                }
+                                                showNowPlayingSheet = true
+                                            }
+                                        }
+                                    )
+                                }
+                            } else {
+                                item(key = "search_empty_yt") {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "В YouTube Music не знайдено треків за запитом «$unifiedSearchQuery»",
+                                            color = DarkRefTheme.TextSecondary,
+                                            fontSize = 13.sp,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        SearchSourceFilter.SOUNDCLOUD -> {
+                            if (soundCloudResults.isNotEmpty()) {
+                                item(key = "search_header_sc_filtered") {
+                                    Text(
+                                        text = "SoundCloud (${soundCloudResults.size}):",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFFFF9436)
+                                    )
+                                }
+                                items(
+                                    items = soundCloudResults,
+                                    key = { "s_sc_f_${it.id}" },
+                                    contentType = { "track" }
+                                ) { track ->
+                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isPlaying = isCurrent && isPlaybackPlaying
+                                    TrackItemRow(
+                                        track = track,
+                                        onPlay = {
+                                            handleTrackPlayPause(track) {
+                                                playOnlineSafely {
+                                                    val idx = soundCloudResults.indexOf(track).coerceAtLeast(0)
+                                                    viewModel.playQueue(soundCloudResults, idx)
+                                                }
+                                            }
+                                        },
+                                        isFavorite = track.id in favoriteTrackIds,
+                                        isCurrentTrack = isCurrent,
+                                        isPlayingThisTrack = isPlaying,
+                                        onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                        onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
+                                        onTrackCardClick = {
+                                            playOnlineSafely {
+                                                if (!isCurrent) {
+                                                    val idx = soundCloudResults.indexOf(track).coerceAtLeast(0)
+                                                    viewModel.playQueue(soundCloudResults, idx)
+                                                }
+                                                showNowPlayingSheet = true
+                                            }
+                                        }
+                                    )
+                                }
+                            } else {
+                                item(key = "search_empty_sc") {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "В SoundCloud не знайдено треків за запитом «$unifiedSearchQuery»",
+                                            color = DarkRefTheme.TextSecondary,
+                                            fontSize = 13.sp,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -502,15 +831,21 @@ fun PlayerCoreScreen() {
                                             key = { "feat_${it.id}" },
                                             contentType = { "featured" }
                                         ) { track ->
+                                            val isCurrent = currentPlayingTrack?.id == track.id
+                                            val isPlaying = isCurrent && isPlaybackPlaying
                                             FeaturedTrackCard(
                                                 track = track,
                                                 onPlay = {
-                                                    playOnlineSafely {
-                                                        val idx = featuredTracks.indexOf(track).coerceAtLeast(0)
-                                                        viewModel.playQueue(featuredTracks, idx)
-                                                        showNowPlayingSheet = true
+                                                    handleTrackPlayPause(track) {
+                                                        playOnlineSafely {
+                                                            val idx = featuredTracks.indexOf(track).coerceAtLeast(0)
+                                                            viewModel.playQueue(featuredTracks, idx)
+                                                            showNowPlayingSheet = true
+                                                        }
                                                     }
-                                                }
+                                                },
+                                                isCurrentTrack = isCurrent,
+                                                isPlayingThisTrack = isPlaying
                                             )
                                         }
                                     }
@@ -555,14 +890,23 @@ fun PlayerCoreScreen() {
                                     contentType = { "track" }
                                 ) { histItem ->
                                     val track = histItem.toAudioTrack()
+                                    val isCurrent = currentPlayingTrack?.id == track.id
+                                    val isPlaying = isCurrent && isPlaybackPlaying
                                     TrackItemRow(
                                         track = track,
-                                        onPlay = { viewModel.playTrack(track) },
+                                        onPlay = {
+                                            handleTrackPlayPause(track) {
+                                                viewModel.playTrack(track)
+                                            }
+                                        },
                                         isFavorite = track.id in favoriteTrackIds,
-                                        isPlayingThisTrack = currentPlayingTrack?.id == track.id,
+                                        isCurrentTrack = isCurrent,
+                                        isPlayingThisTrack = isPlaying,
                                         onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                         onTrackCardClick = {
-                                            viewModel.playTrack(track)
+                                            if (!isCurrent) {
+                                                viewModel.playTrack(track)
+                                            }
                                             showNowPlayingSheet = true
                                         }
                                     )
@@ -603,10 +947,20 @@ fun PlayerCoreScreen() {
                                 key = { "radio_${it.name}" },
                                 contentType = { "station" }
                             ) { station ->
-                                val isStationPlaying = currentPlayingTrack?.title == station.name && isPlaybackPlaying
+                                val isStationCurrent = currentPlayingTrack?.title == station.name
+                                val isStationPlaying = isStationCurrent && isPlaybackPlaying
                                 TrackItemRow(
                                     track = AudioTrack.fromRadio(station),
-                                    onPlay = { playOnlineSafely { viewModel.playRadioStation(station) } },
+                                    onPlay = {
+                                        playOnlineSafely {
+                                            if (isStationCurrent) {
+                                                if (isPlaybackPlaying) viewModel.pause() else viewModel.play()
+                                            } else {
+                                                viewModel.playRadioStation(station)
+                                            }
+                                        }
+                                    },
+                                    isCurrentTrack = isStationCurrent,
                                     isPlayingThisTrack = isStationPlaying
                                 )
                             }
@@ -892,26 +1246,31 @@ fun PlayerCoreScreen() {
                                             contentType = { "track" }
                                         ) { track ->
                                             val isSelected = selectedTracks.contains(track)
+                                            val isCurrent = currentPlayingTrack?.id == track.id
+                                            val isPlaying = isCurrent && isPlaybackPlaying
                                             TrackItemRow(
                                                 track = track,
                                                 onPlay = {
                                                     if (isMultiSelectMode) {
                                                         selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
                                                     } else {
-                                                        viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                        handleTrackPlayPause(track) {
+                                                            viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                        }
                                                     }
                                                 },
                                                 isSelectionMode = isMultiSelectMode,
                                                 isSelected = isSelected,
                                                 isFavorite = track.id in favoriteTrackIds,
-                                                isPlayingThisTrack = currentPlayingTrack?.id == track.id,
+                                                isCurrentTrack = isCurrent,
+                                                isPlayingThisTrack = isPlaying,
                                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                                 onToggleSelect = {
                                                     selectedTracks = if (isSelected) selectedTracks - track else selectedTracks + track
                                                 },
                                                 onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                                                 onTrackCardClick = {
-                                                    if (currentPlayingTrack?.id != track.id) {
+                                                    if (!isCurrent) {
                                                         viewModel.playQueue(sortedLocalTracks, sortedLocalTracks.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
                                                     }
                                                     showNowPlayingSheet = true
@@ -1038,17 +1397,22 @@ fun PlayerCoreScreen() {
                                             key = { "fav_${it.id}" },
                                             contentType = { "track" }
                                         ) { track ->
+                                            val isCurrent = currentPlayingTrack?.id == track.id
+                                            val isPlaying = isCurrent && isPlaybackPlaying
                                             TrackItemRow(
                                                 track = track,
                                                 onPlay = {
-                                                    viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                    handleTrackPlayPause(track) {
+                                                        viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
+                                                    }
                                                 },
                                                 isFavorite = true,
-                                                isPlayingThisTrack = currentPlayingTrack?.id == track.id,
+                                                isCurrentTrack = isCurrent,
+                                                isPlayingThisTrack = isPlaying,
                                                 onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
                                                 onAddToPlaylist = { tracksToAddToPlaylist = listOf(track) },
                                                 onTrackCardClick = {
-                                                    if (currentPlayingTrack?.id != track.id) {
+                                                    if (!isCurrent) {
                                                         viewModel.playQueue(sortedFavorites, sortedFavorites.indexOfFirst { it.id == track.id }.coerceAtLeast(0))
                                                     }
                                                     showNowPlayingSheet = true
@@ -1298,15 +1662,8 @@ fun PlayerCoreScreen() {
                             color = DarkRefTheme.TextSecondary
                         )
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(DarkRefTheme.SurfaceCardElevated.copy(alpha = 0.94f))
-                        .border(
-                            width = 1.dp,
-                            color = Color.White.copy(alpha = 0.12f),
-                            shape = RoundedCornerShape(14.dp)
-                        ),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp),
                     singleLine = true,
                     leadingIcon = {
                         Icon(
@@ -1320,8 +1677,10 @@ fun PlayerCoreScreen() {
                         if (unifiedSearchQuery.isNotEmpty()) {
                             IconButton(onClick = {
                                 unifiedSearchQuery = ""
+                                searchSourceFilter = SearchSourceFilter.ALL
                                 viewModel.searchYouTube("")
                                 viewModel.searchSoundCloud("")
+                                focusManager.clearFocus()
                             }) {
                                 Icon(
                                     imageVector = Icons.Rounded.Close,
@@ -1335,10 +1694,10 @@ fun PlayerCoreScreen() {
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = DarkRefTheme.TextPrimary,
                         unfocusedTextColor = DarkRefTheme.TextPrimary,
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedBorderColor = DarkRefTheme.AccentMint.copy(alpha = 0.6f),
-                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = DarkRefTheme.SurfaceCardElevated.copy(alpha = 0.94f),
+                        unfocusedContainerColor = DarkRefTheme.SurfaceCardElevated.copy(alpha = 0.94f),
+                        focusedBorderColor = DarkRefTheme.AccentMint,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.12f),
                         cursorColor = DarkRefTheme.AccentMint
                     )
                 )
@@ -1381,7 +1740,12 @@ fun PlayerCoreScreen() {
                 // Bottom Navigation Bar with 4 tabs
                 BottomNavBar(
                     selectedTab = currentTab,
-                    onTabSelected = { currentTab = it }
+                    onTabSelected = {
+                        currentTab = it
+                        unifiedSearchQuery = ""
+                        searchSourceFilter = SearchSourceFilter.ALL
+                        focusManager.clearFocus()
+                    }
                 )
             }
         }
@@ -1477,3 +1841,38 @@ private fun IsolatedNowPlayingSheet(
         onAddToPlaylist = onAddToPlaylist
     )
 }
+
+@Composable
+private fun SearchFilterChip(
+    label: String,
+    isSelected: Boolean,
+    selectedBgColor: Color,
+    selectedTextColor: Color,
+    unselectedBorderColor: Color,
+    unselectedTextColor: Color,
+    count: Int? = null,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = if (isSelected) selectedBgColor else DarkRefTheme.SurfaceCardElevated,
+        border = BorderStroke(1.dp, if (isSelected) selectedBgColor else unselectedBorderColor),
+        modifier = Modifier.height(28.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            val text = if (count != null && count > 0) "$label ($count)" else label
+            Text(
+                text = text,
+                color = if (isSelected) selectedTextColor else unselectedTextColor,
+                fontSize = 11.5.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+            )
+        }
+    }
+}
+
