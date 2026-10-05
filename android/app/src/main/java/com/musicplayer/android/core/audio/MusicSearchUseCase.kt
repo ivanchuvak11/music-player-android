@@ -67,29 +67,15 @@ class MusicSearchUseCase(
                 withTimeoutOrNull(2500L) { fetchSoundCloud(query, limit) }
                     ?: Result.failure(MusicSourceError.Timeout("soundcloud"))
             }
-            val audiusDeferred = async {
-                withTimeoutOrNull(2500L) { fetchAudius(query, limit) }
-                    ?: Result.failure(MusicSourceError.Timeout("audius"))
-            }
-            val jamendoDeferred = async {
-                withTimeoutOrNull(2500L) { fetchJamendo(query, limit) }
-                    ?: Result.failure(MusicSourceError.Timeout("jamendo"))
-            }
 
             val soundCloudResult = soundCloudDeferred.await()
-            val audiusResult = audiusDeferred.await()
-            val jamendoResult = jamendoDeferred.await()
             val soundCloudTracks = soundCloudResult.getOrElse { emptyList() }
-            val audiusTracks = audiusResult.getOrElse { emptyList() }
-            val jamendoTracks = jamendoResult.getOrElse { emptyList() }
 
-            val merged = mergeAndDeduplicateSources(soundCloudTracks, audiusTracks, jamendoTracks)
+            val merged = mergeAndDeduplicateSources(soundCloudTracks)
 
             // Collect per-source errors (for UI partial failure notification)
             val errors = mutableMapOf<String, MusicSourceError>()
             soundCloudResult.onFailure { err -> if (err is MusicSourceError) errors["soundcloud"] = err }
-            audiusResult.onFailure { err -> if (err is MusicSourceError) errors["audius"] = err }
-            jamendoResult.onFailure { err -> if (err is MusicSourceError) errors["jamendo"] = err }
 
             // Cache results if at least some results came back (ТЗ Section 5)
             if (merged.isNotEmpty()) {
@@ -135,70 +121,6 @@ class MusicSearchUseCase(
         } catch (e: Exception) {
             Log.e(TAG, "SoundCloud unknown error: ${e.message}", e)
             Result.failure(MusicSourceError.Unknown("soundcloud", e.message.orEmpty()))
-        }
-    }
-
-    private suspend fun fetchAudius(query: String, limit: Int): Result<List<UnifiedTrack>> {
-        return try {
-            val response = apiService.searchAudiusTracks(query.trim(), limit)
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body.isNullOrEmpty()) {
-                    Log.d(TAG, "Audius: empty response for query='$query'")
-                    Result.success(emptyList())
-                } else {
-                    val tracks = body.map { UnifiedTrack.fromAudius(it) }
-                    Log.d(TAG, "Audius: ${tracks.size} results")
-                    Result.success(tracks)
-                }
-            } else {
-                val error = httpCodeToMusicError(response.code(), "audius")
-                Log.w(TAG, "Audius HTTP ${response.code()}: ${error.message}")
-                Result.failure(error)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: SocketTimeoutException) {
-            Log.w(TAG, "Audius timeout: ${e.message}")
-            Result.failure(MusicSourceError.Timeout("audius"))
-        } catch (e: IOException) {
-            Log.w(TAG, "Audius network IO: ${e.message}")
-            Result.failure(MusicSourceError.NoNetwork("audius"))
-        } catch (e: Exception) {
-            Log.e(TAG, "Audius unknown error: ${e.message}", e)
-            Result.failure(MusicSourceError.Unknown("audius", e.message.orEmpty()))
-        }
-    }
-
-    private suspend fun fetchJamendo(query: String, limit: Int): Result<List<UnifiedTrack>> {
-        return try {
-            val response = apiService.searchJamendoTracks(query.trim(), limit)
-            if (response.isSuccessful) {
-                val body = response.body()
-                if (body.isNullOrEmpty()) {
-                    Log.d(TAG, "Jamendo: empty response for query='$query'")
-                    Result.success(emptyList())
-                } else {
-                    val tracks = body.map { UnifiedTrack.fromJamendo(it) }
-                    Log.d(TAG, "Jamendo: ${tracks.size} results")
-                    Result.success(tracks)
-                }
-            } else {
-                val error = httpCodeToMusicError(response.code(), "jamendo")
-                Log.w(TAG, "Jamendo HTTP ${response.code()}: ${error.message}")
-                Result.failure(error)
-            }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: SocketTimeoutException) {
-            Log.w(TAG, "Jamendo timeout: ${e.message}")
-            Result.failure(MusicSourceError.Timeout("jamendo"))
-        } catch (e: IOException) {
-            Log.w(TAG, "Jamendo network IO: ${e.message}")
-            Result.failure(MusicSourceError.NoNetwork("jamendo"))
-        } catch (e: Exception) {
-            Log.e(TAG, "Jamendo unknown error: ${e.message}", e)
-            Result.failure(MusicSourceError.Unknown("jamendo", e.message.orEmpty()))
         }
     }
 

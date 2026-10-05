@@ -24,10 +24,8 @@ import com.musicplayer.android.core.database.PlayHistoryEntity
 import com.musicplayer.android.core.network.AddFavoriteRadioRequestDto
 import com.musicplayer.android.core.network.AddFavoriteTrackRequestDto
 import com.musicplayer.android.core.network.AddTrackToPlaylistRequestDto
-import com.musicplayer.android.core.network.AudiusTrackDto
 import com.musicplayer.android.core.network.CreatePlaylistRequestDto
 import com.musicplayer.android.core.network.FavoriteTrackDto
-import com.musicplayer.android.core.network.JamendoTrackDto
 import com.musicplayer.android.core.network.LoginRequestDto
 import com.musicplayer.android.core.network.MusicApiService
 import com.musicplayer.android.core.network.NetworkClient
@@ -121,17 +119,6 @@ class MainPlayerViewModel(
     private val _radioStationsByCountry = MutableStateFlow<List<RadioStationDto>>(DEFAULT_UA_RADIO_STATIONS)
     val radioStationsByCountry: StateFlow<List<RadioStationDto>> = _radioStationsByCountry.asStateFlow()
 
-    // Jamendo tracks
-    private val _searchedJamendoTracks = MutableStateFlow<List<JamendoTrackDto>>(emptyList())
-    val searchedJamendoTracks: StateFlow<List<JamendoTrackDto>> = _searchedJamendoTracks.asStateFlow()
-
-    // Audius online music tracks
-    private val _trendingAudiusTracks = MutableStateFlow<List<AudiusTrackDto>>(emptyList())
-    val trendingAudiusTracks: StateFlow<List<AudiusTrackDto>> = _trendingAudiusTracks.asStateFlow()
-
-    private val _searchedAudiusTracks = MutableStateFlow<List<AudiusTrackDto>>(emptyList())
-    val searchedAudiusTracks: StateFlow<List<AudiusTrackDto>> = _searchedAudiusTracks.asStateFlow()
-
     // YouTube Music online tracks
     private val _searchedYouTubeTracks = MutableStateFlow<List<YouTubeTrackDto>>(emptyList())
     val searchedYouTubeTracks: StateFlow<List<YouTubeTrackDto>> = _searchedYouTubeTracks.asStateFlow()
@@ -205,8 +192,6 @@ class MainPlayerViewModel(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    private var jamendoSearchJob: Job? = null
-    private var audiusSearchJob: Job? = null
     private var youtubeSearchJob: Job? = null
     private var soundCloudSearchJob: Job? = null
     private var lastPositionSaveTimeMs = 0L
@@ -806,40 +791,7 @@ class MainPlayerViewModel(
         playQueue(radioTracks, startIndex)
     }
 
-    fun playJamendoTrack(track: JamendoTrackDto) {
-        // Fix #1: Always supply configured baseUrl so Jamendo plays on physical phones
-        val baseUrl = sessionManager.getBaseUrl()
-        val allJamendo = _searchedJamendoTracks.value
-        if (allJamendo.isNotEmpty()) {
-            val audioTracks = allJamendo.map { AudioTrack.fromJamendo(it, baseUrl) }
-            val index = allJamendo.indexOfFirst { it.externalId == track.externalId }.coerceAtLeast(0)
-            playQueue(audioTracks, index)
-        } else {
-            playTrack(AudioTrack.fromJamendo(track, baseUrl))
-        }
-    }
 
-    fun playJamendoQueue(tracks: List<JamendoTrackDto>, startIndex: Int = 0) {
-        // Fix #1: Always supply configured baseUrl
-        val baseUrl = sessionManager.getBaseUrl()
-        val audioTracks = tracks.map { AudioTrack.fromJamendo(it, baseUrl) }
-        playQueue(audioTracks, startIndex)
-    }
-
-    fun playAudiusTrack(track: AudiusTrackDto, baseUrl: String = sessionManager.getBaseUrl()) {
-        val allAudius = if (_trendingAudiusTracks.value.any { it.externalId == track.externalId }) {
-            _trendingAudiusTracks.value
-        } else {
-            _searchedAudiusTracks.value
-        }
-        if (allAudius.isNotEmpty()) {
-            val audioTracks = allAudius.map { AudioTrack.fromAudius(it, baseUrl) }
-            val index = allAudius.indexOfFirst { it.externalId == track.externalId }.coerceAtLeast(0)
-            playQueue(audioTracks, index)
-        } else {
-            playTrack(AudioTrack.fromAudius(track, baseUrl))
-        }
-    }
 
     fun playYouTubeTrack(track: com.musicplayer.android.core.network.YouTubeTrackDto) {
         val baseUrl = sessionManager.getBaseUrl()
@@ -977,18 +929,6 @@ class MainPlayerViewModel(
         _onlineSearchError.value = "Сервер недоступний ($url). Перевірте підключення до бекенду або адресу в Налаштуваннях."
     }
 
-    fun searchJamendo(query: String, limit: Int = 20) {
-        // Disabled: Jamendo source is turned off
-        _searchedJamendoTracks.value = emptyList()
-    }
-
-    /**
-     * Fix #25: Debounced Audius search (400ms delay).
-     */
-    fun searchAudius(query: String, limit: Int = 20) {
-        // Disabled: Audius source is turned off
-        _searchedAudiusTracks.value = emptyList()
-    }
 
     fun searchYouTube(query: String, limit: Int = 20) {
         youtubeSearchJob?.cancel()
@@ -1151,7 +1091,7 @@ class MainPlayerViewModel(
                 refreshOnlineSearchResults(query.trim())
 
                 if (result.allSourcesFailed) {
-                    android.util.Log.w("MainPlayerViewModel", "All 3 sources failed for query: '$query'")
+                    android.util.Log.w("MainPlayerViewModel", "Search sources failed for query: '$query'")
                 }
             } catch (e: CancellationException) {
                 throw e

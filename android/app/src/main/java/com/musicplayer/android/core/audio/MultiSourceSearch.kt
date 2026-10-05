@@ -14,7 +14,7 @@ data class MultiSourceSearchResult(
 ) {
     val hasResults: Boolean get() = tracks.isNotEmpty()
     val hasErrors: Boolean get() = errors.isNotEmpty()
-    val allSourcesFailed: Boolean get() = errors.size == 3 // SoundCloud + Audius + Jamendo
+    val allSourcesFailed: Boolean get() = tracks.isEmpty() && errors.isNotEmpty()
 }
 
 /**
@@ -53,21 +53,19 @@ fun List<UnifiedTrack>.sortByRelevance(query: String): List<UnifiedTrack> {
 }
 
 /**
- * Merges results from SoundCloud, Audius, Jamendo into a single deduplicated list.
- * Order per ТЗ Section 3: SoundCloud → Audius → Jamendo.
+ * Merges and deduplicates results from sources (e.g. SoundCloud, YouTube) into a single list.
  * Deduplicates by (source + externalId).
  */
 fun mergeAndDeduplicateSources(
     soundCloudTracks: List<UnifiedTrack>,
-    audiusTracks: List<UnifiedTrack>,
-    jamendoTracks: List<UnifiedTrack>
+    audiusTracks: List<UnifiedTrack> = emptyList(),
+    jamendoTracks: List<UnifiedTrack> = emptyList()
 ): List<UnifiedTrack> {
-    // Concatenate in source priority order
     val merged = soundCloudTracks + audiusTracks + jamendoTracks
     val result = merged.deduplicateBySourceAndId()
     Log.d(
         "MusicSearch",
-        "Merged: SC=${soundCloudTracks.size}, Audius=${audiusTracks.size}, Jamendo=${jamendoTracks.size} " +
+        "Merged: SC=${soundCloudTracks.size}, Other=${audiusTracks.size + jamendoTracks.size} " +
             "→ total=${merged.size}, after dedup=${result.size}"
     )
     return result
