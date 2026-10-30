@@ -1026,6 +1026,91 @@ Jamendo використовується для:
 
 ---
 
+# Статистика та аналітичні звіти
+
+## Персональний звіт користувача за період
+
+Повертає статистику активності та збереженої музики поточного авторизованого користувача за період (день, тиждень, місяць або за весь час).
+
+```http
+GET /api/stats/user-summary?period=week
+```
+
+### Параметри запиту (Query Parameters)
+
+| Параметр | Тип | Опис | За замовчуванням |
+|---|---|---|---|
+| `period` | string | Період аналітики: `day` (останні 24 години), `week` (7 днів), `month` (30 днів), `all` (за весь час) | `week` |
+
+### Заголовки
+
+```http
+Authorization: Bearer <token>
+```
+
+### Приклад відповіді (`200 OK`)
+
+```json
+{
+  "period": "week",
+  "startDateUtc": "2026-10-23T16:00:00Z",
+  "endDateUtc": "2026-10-30T16:00:00Z",
+  "playlistsCreatedCount": 2,
+  "tracksAddedCount": 15,
+  "favoritesAddedCount": 8,
+  "radioFavoritesAddedCount": 3,
+  "totalSavedItemsCount": 26,
+  "totalDurationMs": 4820000,
+  "totalDurationMinutes": 80.3,
+  "topArtists": [
+    { "artist": "The Weeknd", "trackCount": 5 },
+    { "artist": "Linkin Park", "trackCount": 3 }
+  ],
+  "sourceBreakdown": [
+    { "source": "YouTube", "count": 14, "percentage": 53.8 },
+    { "source": "SoundCloud", "count": 9, "percentage": 34.6 },
+    { "source": "Radio", "count": 3, "percentage": 11.6 }
+  ],
+  "recentActivity": [
+    {
+      "activityType": "PlaylistTrack",
+      "title": "Blinding Lights",
+      "artistOrDetails": "The Weeknd",
+      "source": "YouTube",
+      "timestamp": "2026-10-30T14:22:00Z"
+    }
+  ]
+}
+```
+
+---
+
+## Зведений системний звіт для адміністратора
+
+Формує аналітичний звіт платформи щодо активності користувачів та приросту контенту за обраний період.
+
+```http
+GET /api/stats/system-report?period=week
+```
+
+### Параметри запиту (Query Parameters)
+
+| Параметр | Тип | Опис | За замовчуванням |
+|---|---|---|---|
+| `period` | string | `day`, `week`, `month`, `all` | `week` |
+
+---
+
+## Публічний огляд платформи (Гість)
+
+Доступний без авторизації огляд доступних джерел та загальних показників системи.
+
+```http
+GET /api/stats/overview
+```
+
+---
+
 # HTTP-коди відповідей
 
 | Код | Значення |
