@@ -2,6 +2,8 @@ package com.musicplayer.android.core.audio
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.net.Uri
+import java.io.File
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -45,6 +47,19 @@ class MusicPlayerService : MediaSessionService() {
             baseCacheDataSourceFactory,
             androidx.media3.datasource.ResolvingDataSource.Resolver { dataSpec ->
                 val uri = dataSpec.uri
+                // 1. Перевіряємо, чи трек вже збережений офлайн у filesDir/offline_tracks
+                val rawKey = dataSpec.key ?: YouTubeExtractorService.extractVideoIdFromUri(uri)?.let { "youtube_$it" }
+                if (!rawKey.isNullOrBlank()) {
+                    val safeFileName = rawKey.replace(Regex("[^a-zA-Z0-9_-]"), "_") + ".mp3"
+                    val offlineFile = File(TrackDownloadManager.getOfflineTracksDirectory(this@MusicPlayerService), safeFileName)
+                    if (offlineFile.exists() && offlineFile.length() >= 51_200L) {
+                        return@Resolver dataSpec.buildUpon()
+                            .setUri(Uri.fromFile(offlineFile))
+                            .build()
+                    }
+                }
+
+                // 2. Якщо локального файлу немає — резолвимо YouTube-потік
                 val videoId = YouTubeExtractorService.extractVideoIdFromUri(uri)
                 if (videoId != null) {
                     val resolvedUrl = YouTubeExtractorService.resolveAudioStreamUrlSync(videoId)
@@ -52,7 +67,7 @@ class MusicPlayerService : MediaSessionService() {
                         // Core Optimization: Set immutable custom cache key "youtube_$videoId"
                         // Ensures ExoPlayer's SimpleCache hits local disk cache regardless of expiring CDN URL query tokens!
                         return@Resolver dataSpec.buildUpon()
-                            .setUri(android.net.Uri.parse(resolvedUrl))
+                            .setUri(Uri.parse(resolvedUrl))
                             .setKey("youtube_$videoId")
                             .build()
                     }

@@ -432,10 +432,8 @@ class MainPlayerViewModel(
                     limit = 12
                 )
                 if (similar.isNotEmpty()) {
-                    similar.forEach { track -> playerController.addToQueue(track) }
+                    playerController.addTracksToQueue(similar)
                     android.util.Log.i("Autoplay", "Added ${similar.size} similar tracks to queue")
-                    val upcomingIds = similar.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
-                    com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
                     // If player is ended or reached the end while fetching, advance to the new track
                     val state = playbackState.value
                     if (!state.isPlaying && (state.currentPositionMs >= (currentTrack.durationMs - 1500L).coerceAtLeast(0L) || currentTrack.durationMs <= 0L)) {
@@ -472,11 +470,8 @@ class MainPlayerViewModel(
                     limit = 15
                 )
                 if (similar.isNotEmpty()) {
-                    similar.forEach { track -> playerController.addToQueue(track) }
+                    playerController.addTracksToQueue(similar)
                     android.util.Log.i("Autoplay", "Explicit Next: appended ${similar.size} similar tracks")
-                    val upcomingIds = similar.take(3).map { it.id }.filter { it.startsWith("youtube_") || it.contains("youtu") }
-                    com.musicplayer.android.core.audio.YouTubeExtractorService.prefetchNextTracks(upcomingIds)
-                    delay(200)
                     playerController.playNext()
                 } else if (currentQueue.size > 1) {
                     // Loop to start if no similar tracks found
@@ -632,15 +627,6 @@ class MainPlayerViewModel(
 
     fun playNext() {
         val current = playbackState.value.currentTrack
-        if (current?.isLiveStream == true) {
-            val stations = _radioStationsByCountry.value.ifEmpty { DEFAULT_UA_RADIO_STATIONS }
-            if (stations.isNotEmpty()) {
-                val currentIndex = stations.indexOfFirst { it.name == current.title }
-                val nextIndex = if (currentIndex >= 0) (currentIndex + 1) % stations.size else 0
-                playRadioStation(stations[nextIndex])
-                return
-            }
-        }
         val state = playbackState.value
         // When user taps "Next" on the last song in queue, trigger instant Autoplay extension
         if (!state.hasNext) {
@@ -657,16 +643,6 @@ class MainPlayerViewModel(
     }
 
     fun playPrevious() {
-        val current = playbackState.value.currentTrack
-        if (current?.isLiveStream == true) {
-            val stations = _radioStationsByCountry.value.ifEmpty { DEFAULT_UA_RADIO_STATIONS }
-            if (stations.isNotEmpty()) {
-                val currentIndex = stations.indexOfFirst { it.name == current.title }
-                val prevIndex = if (currentIndex > 0) currentIndex - 1 else stations.size - 1
-                playRadioStation(stations[prevIndex])
-                return
-            }
-        }
         playerController.playPrevious()
     }
 
@@ -785,10 +761,16 @@ class MainPlayerViewModel(
     }
 
     fun playRadioStation(station: RadioStationDto) {
-        val stations = _radioStationsByCountry.value.ifEmpty { DEFAULT_UA_RADIO_STATIONS }
-        val radioTracks = stations.map { AudioTrack.fromRadio(it) }
-        val startIndex = stations.indexOfFirst { it.stationId == station.stationId }.coerceAtLeast(0)
-        playQueue(radioTracks, startIndex)
+        val searchStations = _radioStations.value
+        val countryStations = _radioStationsByCountry.value.ifEmpty { DEFAULT_UA_RADIO_STATIONS }
+        val sourceList = when {
+            searchStations.any { it.stationId == station.stationId } -> searchStations
+            countryStations.any { it.stationId == station.stationId } -> countryStations
+            else -> listOf(station) + countryStations
+        }
+        val tracks = sourceList.map { AudioTrack.fromRadio(it) }
+        val index = sourceList.indexOfFirst { it.stationId == station.stationId }.coerceAtLeast(0)
+        playQueue(tracks, index)
     }
 
 
@@ -851,8 +833,20 @@ class MainPlayerViewModel(
         playerController.addToQueue(track)
     }
 
+    fun addTracksToQueue(tracks: List<AudioTrack>) {
+        playerController.addTracksToQueue(tracks)
+    }
+
     fun removeFromQueue(index: Int) {
         playerController.removeFromQueue(index)
+    }
+
+    fun skipToQueueItem(index: Int) {
+        playerController.skipToQueueItem(index)
+    }
+
+    fun moveQueueItem(fromIndex: Int, toIndex: Int) {
+        playerController.moveQueueItem(fromIndex, toIndex)
     }
 
     // Sleep Timer Controls
@@ -1219,32 +1213,29 @@ class MainPlayerViewModel(
      */
     fun playUnifiedTrack(track: com.musicplayer.android.core.audio.UnifiedTrack) {
         if (track.source == com.musicplayer.android.core.audio.TrackSource.LOCAL) {
-            val audioTrack = track.toAudioTrack(sessionManager.getBaseUrl())
-            playerController.playTrack(audioTrack)
+            playLocalTrack(track.toAudioTrack(sessionManager.getBaseUrl()))
             return
         }
         viewModelScope.launch {
             try {
-                val audioTrack = track.toAudioTrack(sessionManager.getBaseUrl())
-                playerController.playTrack(audioTrack)
-                // Add to play history
-                try {
-                    db.playHistoryDao().deleteTrackHistory(audioTrack.id)
-                    db.playHistoryDao().insertHistory(
-                        com.musicplayer.android.core.database.PlayHistoryEntity(
-                            trackId = audioTrack.id,
-                            title = audioTrack.title,
-                            artist = audioTrack.artist,
-                            audioUrl = audioTrack.audioUrl,
-                            artworkUrl = audioTrack.artworkUrl,
-                            durationMs = audioTrack.durationMs,
-                            lastPositionMs = 0L,
-                            playedAtTimestamp = System.currentTimeMillis()
-                        )
-                    )
-                    db.playHistoryDao().trimOldHistory()
-                } catch (e: Exception) {
-                    android.util.Log.e("MainPlayerViewModel", "playUnifiedTrack history error: ${e.message}", e)
+                val baseUrl = sessionManager.getBaseUrl()
+                val targetAudioTrack = track.toAudioTrack(baseUrl)
+
+                // Перевіряємо, чи трек запущений зі списку уніфікованого пошуку або трендів
+                val searchList = _unifiedSearchResults.value
+                val trendingList = _trendingOnlineTracks.value
+                val activeList = when {
+                    searchList.any { areTrackIdsEqual(it.id, track.id) } -> searchList.map { it.toAudioTrack(baseUrl) }
+                    trendingList.any { areTrackIdsEqual(it.id, targetAudioTrack.id) } -> trendingList
+                    else -> emptyList()
+                }
+
+                if (activeList.isNotEmpty()) {
+                    val startIndex = activeList.indexOfFirst { areTrackIdsEqual(it.id, targetAudioTrack.id) }
+                        .coerceAtLeast(0)
+                    playQueue(activeList, startIndex)
+                } else {
+                    playerController.playTrack(targetAudioTrack)
                 }
             } catch (e: CancellationException) {
                 throw e

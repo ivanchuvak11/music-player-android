@@ -25,7 +25,10 @@ interface PlayerController {
 
     // M12 FIX: Granular queue management
     fun addToQueue(track: AudioTrack)
+    fun addTracksToQueue(tracks: List<AudioTrack>)
     fun removeFromQueue(index: Int)
+    fun skipToQueueItem(index: Int)
+    fun moveQueueItem(fromIndex: Int, toIndex: Int)
 
     fun release()
 }

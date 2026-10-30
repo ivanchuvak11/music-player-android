@@ -209,10 +209,7 @@ fun NowPlayingSheet(
         if (!isShuffle && !isShufflingAnimation) {
             val settledIndex = pagerState.settledPage
             if (settledIndex in currentQueue.indices && settledIndex != activeTrackIndex) {
-                val selectedTrack = currentQueue[settledIndex]
-                if (!areTrackIdsEqual(selectedTrack.id, activeTrack.id)) {
-                    viewModel.playTrack(selectedTrack)
-                }
+                viewModel.skipToQueueItem(settledIndex)
             }
         }
     }
@@ -801,7 +798,7 @@ fun NowPlayingSheet(
                         upcomingQueueTracks.take(12).forEachIndexed { index, track ->
                             val queueIndex = activeTrackIndex + 1 + index
                             Surface(
-                                onClick = { viewModel.playTrack(track) },
+                                onClick = { viewModel.skipToQueueItem(queueIndex) },
                                 shape = RoundedCornerShape(14.dp),
                                 color = DarkRefTheme.SurfaceCard.copy(alpha = 0.7f),
                                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.05f)),
@@ -864,7 +861,7 @@ fun NowPlayingSheet(
                                         )
                                     }
                                     IconButton(
-                                        onClick = { viewModel.playTrack(track) },
+                                        onClick = { viewModel.skipToQueueItem(queueIndex) },
                                         modifier = Modifier.size(32.dp)
                                     ) {
                                         Icon(

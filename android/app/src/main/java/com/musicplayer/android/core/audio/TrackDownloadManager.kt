@@ -75,9 +75,17 @@ object TrackDownloadManager {
             return@withContext targetFile
         }
 
+        val videoId = YouTubeExtractorService.extractVideoIdFromUrl(audioUrl)
+            ?: trackId.takeIf { it.startsWith("youtube_") }?.removePrefix("youtube_")
+        val effectiveDownloadUrl = if (!videoId.isNullOrBlank()) {
+            YouTubeExtractorService.resolveAudioStreamUrlSync(videoId) ?: return@withContext null
+        } else {
+            audioUrl
+        }
+
         val client = NetworkClient.getOkHttpClient(context)
         val request = Request.Builder()
-            .url(audioUrl)
+            .url(effectiveDownloadUrl)
             .get()
             .build()
 

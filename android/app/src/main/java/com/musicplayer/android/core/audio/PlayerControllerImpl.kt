@@ -16,6 +16,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -63,9 +64,23 @@ class PlayerControllerImpl(
     // Fix #6: consecutive error counter to break infinite skip loops
     private var consecutiveErrors = 0
     private val maxConsecutiveErrors = 3
+    private var pendingNetworkRecovery = false
 
     init {
         initializeController()
+        scope.launch {
+            com.musicplayer.android.core.network.NetworkConnectivityObserver(context).observe()
+                .distinctUntilChanged()
+                .collect { isConnected ->
+                    if (isConnected && pendingNetworkRecovery) {
+                        pendingNetworkRecovery = false
+                        val controller = mediaController ?: return@collect
+                        _playbackState.value = _playbackState.value.copy(errorMessage = null)
+                        controller.prepare()
+                        controller.play()
+                    }
+                }
+        }
     }
 
     private fun initializeController() {
@@ -204,7 +219,16 @@ class PlayerControllerImpl(
                     isPlaying = false
                 )
 
-                // Fix #6: Auto-skip to next, but stop after maxConsecutiveErrors to prevent infinite loop
+                if (isNetworkError) {
+                    // Якщо інтернету немає взагалі — НЕ перескакуємо на наступні треки в черзі,
+                    // а ставимо прапорець очікування відновлення мережі:
+                    pendingNetworkRecovery = true
+                    retryJob?.cancel()
+                    retryJob = null
+                    return
+                }
+
+                // Auto-skip to next for non-network errors, but stop after maxConsecutiveErrors to prevent infinite loop
                 val controller = mediaController
                 if (controller != null && controller.hasNextMediaItem()) {
                     consecutiveErrors++
@@ -307,9 +331,15 @@ class PlayerControllerImpl(
         consecutiveErrors = 0
         retryJob?.cancel()
         retryJob = null
-        val controller = mediaController
-        if (controller != null && controller.mediaItemCount > 0) {
-            controller.seekToNextMediaItem()
+        val controller = mediaController ?: return
+        if (controller.mediaItemCount > 0) {
+            if (controller.hasNextMediaItem()) {
+                controller.seekToNextMediaItem()
+            } else if (controller.repeatMode == Player.REPEAT_MODE_ALL) {
+                controller.seekToDefaultPosition(0)
+            }
+            controller.play()
+            updateState()
         }
     }
 
@@ -318,9 +348,11 @@ class PlayerControllerImpl(
         consecutiveErrors = 0
         retryJob?.cancel()
         retryJob = null
-        val controller = mediaController
-        if (controller != null && controller.mediaItemCount > 0) {
+        val controller = mediaController ?: return
+        if (controller.mediaItemCount > 0) {
             controller.seekToPreviousMediaItem()
+            controller.play()
+            updateState()
         }
     }
 
@@ -483,6 +515,56 @@ class PlayerControllerImpl(
             pendingPlaybackSpeed = clampedSpeed
         }
         _playbackState.value = _playbackState.value.copy(playbackSpeed = clampedSpeed)
+    }
+
+    override fun skipToQueueItem(index: Int) {
+        val controller = mediaController ?: return
+        if (index in 0 until controller.mediaItemCount) {
+            _playbackState.value = _playbackState.value.copy(errorMessage = null)
+            consecutiveErrors = 0
+            retryJob?.cancel()
+            retryJob = null
+            if (controller.currentMediaItemIndex != index) {
+                controller.seekToDefaultPosition(index)
+            }
+            controller.play()
+            updateState()
+        }
+    }
+
+    override fun moveQueueItem(fromIndex: Int, toIndex: Int) {
+        val controller = mediaController ?: return
+        val safeSize = minOf(currentQueue.size, controller.mediaItemCount)
+        if (fromIndex in 0 until safeSize && toIndex in 0 until safeSize && fromIndex != toIndex) {
+            currentQueue = currentQueue.toMutableList().apply {
+                val item = removeAt(fromIndex)
+                add(toIndex, item)
+            }
+            controller.moveMediaItem(fromIndex, toIndex)
+            updateState()
+        }
+    }
+
+    override fun addTracksToQueue(tracks: List<AudioTrack>) {
+        if (tracks.isEmpty()) return
+        currentQueue = currentQueue + tracks
+        val controller = mediaController
+        if (controller != null) {
+            controller.addMediaItems(tracks.map { it.toMediaItem() })
+            updateState()
+            val ytIds = tracks.take(3).map { it.id }
+                .filter { it.startsWith("youtube_") || it.contains("youtu") }
+            if (ytIds.isNotEmpty()) {
+                YouTubeExtractorService.prefetchNextTracks(ytIds)
+            }
+        } else {
+            val pending = pendingQueue
+            pendingQueue = if (pending != null) {
+                pending.copy(tracks = pending.tracks + tracks)
+            } else {
+                PendingQueue(tracks = tracks, startIndex = 0, autoPlay = false)
+            }
+        }
     }
 
     override fun addToQueue(track: AudioTrack) {
