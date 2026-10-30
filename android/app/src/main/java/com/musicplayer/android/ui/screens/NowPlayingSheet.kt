@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
@@ -100,13 +102,7 @@ fun NowPlayingSheet(
         if (playbackState.queue.isNotEmpty()) playbackState.queue else listOf(activeTrack)
     }
     val activeTrackIndex = currentQueue.indexOfFirst { areTrackIdsEqual(it.id, activeTrack.id) }.coerceAtLeast(0)
-    val upcomingQueueTracks = remember(currentQueue, activeTrackIndex) {
-        if (activeTrackIndex in currentQueue.indices && activeTrackIndex < currentQueue.lastIndex) {
-            currentQueue.drop(activeTrackIndex + 1)
-        } else {
-            emptyList()
-        }
-    }
+
 
     val pagerState = key(currentQueue) {
         rememberPagerState(
@@ -131,7 +127,6 @@ fun NowPlayingSheet(
     var showEqualizerDialog by remember { mutableStateOf(false) }
     val audioEffectsState by viewModel.audioEffectsState.collectAsState()
     val sheetScrollState = rememberScrollState()
-    val coroutineScope = rememberCoroutineScope()
 
     // Smooth 3-phase circular arc roll when track changes under shuffle:
     // Phase 1: Side covers quickly slide in from behind screen edges
@@ -669,6 +664,42 @@ fun NowPlayingSheet(
                         tint = DarkRefTheme.TextSecondary,
                         modifier = Modifier.size(26.dp)
                     )
+                }
+
+                // Download to Device Button
+                val cachedTracks by viewModel.cachedTracks.collectAsState()
+                val isDownloaded = remember(activeTrack.id, cachedTracks) {
+                    cachedTracks.any { it.id == activeTrack.id }
+                }
+                val downloadProgress by viewModel.downloadProgress.collectAsState()
+                val activeProgress = downloadProgress[activeTrack.id]
+
+                IconButton(
+                    onClick = {
+                        if (!activeTrack.isLocal && !activeTrack.isLiveStream) {
+                            viewModel.downloadTrackToDevice(activeTrack)
+                        }
+                    },
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isDownloaded) DarkRefTheme.AccentMint.copy(alpha = 0.16f) else Color.Transparent)
+                        .padding(2.dp)
+                ) {
+                    if (activeProgress != null && activeProgress in 0..99) {
+                        CircularProgressIndicator(
+                            progress = { activeProgress / 100f },
+                            modifier = Modifier.size(20.dp),
+                            color = DarkRefTheme.AccentMint,
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(
+                            imageVector = if (isDownloaded) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
+                            contentDescription = "Завантажити на пристрій",
+                            tint = if (isDownloaded) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             }
 

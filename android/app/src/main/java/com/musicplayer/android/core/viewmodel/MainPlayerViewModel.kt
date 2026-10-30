@@ -297,6 +297,10 @@ class MainPlayerViewModel(
         loadLocalTracks()
         loadTrendingOnlineTracks()
         viewModelScope.launch {
+            kotlinx.coroutines.delay(1000L)
+            refreshHomeSimilarTracks()
+        }
+        viewModelScope.launch {
             try {
                 localScanner.observeMediaChanges()
                     .debounce(1500L)
@@ -487,6 +491,59 @@ class MainPlayerViewModel(
         }
     }
 
+    // ─── Home Contextual Recommendations (Variant 2) ──────────────────
+    private val _homeSimilarTracks = MutableStateFlow<List<AudioTrack>>(emptyList())
+    val homeSimilarTracks: StateFlow<List<AudioTrack>> = _homeSimilarTracks.asStateFlow()
+
+    private val _homeSimilarSeedTitle = MutableStateFlow<String?>(null)
+    val homeSimilarSeedTitle: StateFlow<String?> = _homeSimilarSeedTitle.asStateFlow()
+
+    private val _isHomeSimilarLoading = MutableStateFlow(false)
+    val isHomeSimilarLoading: StateFlow<Boolean> = _isHomeSimilarLoading.asStateFlow()
+
+    private var homeSimilarJob: Job? = null
+
+    /**
+     * Loads or refreshes the contextual recommendations block on the HOME screen (Variant 2).
+     * Automatically picks the best seed: current playing track, most recent history, or first favorite.
+     */
+    fun refreshHomeSimilarTracks(seedTrack: AudioTrack? = null) {
+        homeSimilarJob?.cancel()
+        homeSimilarJob = viewModelScope.launch {
+            _isHomeSimilarLoading.value = true
+            try {
+                val effectiveSeed = seedTrack
+                    ?: playbackState.value.currentTrack
+                    ?: playHistory.value.firstOrNull()?.toAudioTrack()
+                    ?: localFavorites.value.firstOrNull()?.toAudioTrack()
+                    ?: trendingOnlineTracks.value.firstOrNull()
+
+                if (effectiveSeed == null) {
+                    _homeSimilarTracks.value = emptyList()
+                    _homeSimilarSeedTitle.value = null
+                    return@launch
+                }
+
+                val (artist, title) = com.musicplayer.android.core.audio.AutoplayService.extractCleanMetadata(effectiveSeed)
+                _homeSimilarSeedTitle.value = "$artist — $title"
+
+                val results = com.musicplayer.android.core.audio.AutoplayService.fetchContextualSimilarTracks(
+                    seedTrack = effectiveSeed,
+                    apiService = apiService,
+                    backendBaseUrl = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL,
+                    limit = 16
+                )
+                _homeSimilarTracks.value = results
+            } catch (e: Exception) {
+                if (e !is kotlinx.coroutines.CancellationException) {
+                    android.util.Log.e("MainPlayerViewModel", "Error fetching home similar tracks: ${e.message}")
+                }
+            } finally {
+                _isHomeSimilarLoading.value = false
+            }
+        }
+    }
+
     // ─── Similar Tracks for Any Song (Song Radio / Схожі треки) ────────────────
     private val _similarTracks = MutableStateFlow<List<AudioTrack>>(emptyList())
     val similarTracks: StateFlow<List<AudioTrack>> = _similarTracks.asStateFlow()
@@ -512,8 +569,10 @@ class MainPlayerViewModel(
         similarTracksJob = viewModelScope.launch {
             _isLoadingSimilarTracks.value = true
             try {
-                val results = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
-                    currentTrack = seedTrack,
+                val results = com.musicplayer.android.core.audio.AutoplayService.fetchContextualSimilarTracks(
+                    seedTrack = seedTrack,
+                    apiService = apiService,
+                    backendBaseUrl = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL,
                     existingIds = setOf(seedTrack.id),
                     limit = 20
                 )
@@ -538,8 +597,10 @@ class MainPlayerViewModel(
         viewModelScope.launch {
             _isLoadingSimilarTracks.value = true
             try {
-                val results = com.musicplayer.android.core.audio.AutoplayService.fetchSimilarTracks(
-                    currentTrack = seedTrack,
+                val results = com.musicplayer.android.core.audio.AutoplayService.fetchContextualSimilarTracks(
+                    seedTrack = seedTrack,
+                    apiService = apiService,
+                    backendBaseUrl = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL,
                     existingIds = setOf(seedTrack.id),
                     limit = 20
                 )
@@ -1679,8 +1740,8 @@ class MainPlayerViewModel(
     private val _downloadProgress = MutableStateFlow<Map<String, Int>>(emptyMap())
     val downloadProgress: StateFlow<Map<String, Int>> = _downloadProgress.asStateFlow()
 
-    // Offline caching & Room DB operations
-    fun cacheTrack(track: AudioTrack) {
+    // Direct Device Downloading & Room DB operations
+    fun downloadTrackToDevice(track: AudioTrack) {
         // Rule 1: Never download live streams
         if (track.isLiveStream) {
             _authStatusMessage.value = "Неможливо завантажити прямий радіоефір"
@@ -1692,47 +1753,39 @@ class MainPlayerViewModel(
 
         val job = viewModelScope.launch {
             try {
-                // If it's a remote URL, download it to private app storage first
-                val localFile = if (!track.isLocal && track.audioUrl.startsWith("http")) {
-                    com.musicplayer.android.core.audio.TrackDownloadManager.downloadTrackToPrivateStorage(
-                        context = getApplication(),
-                        trackId = track.id,
-                        audioUrl = track.audioUrl,
-                        isLiveStream = track.isLiveStream,
-                        onProgress = { progress ->
-                            val current = _downloadProgress.value.toMutableMap()
-                            current[track.id] = progress
-                            _downloadProgress.value = current
-                        }
-                    )
-                } else null
-
-                // Rule 2: If download failed or returned null, DO NOT create a corrupt Room record!
-                if (!track.isLocal && track.audioUrl.startsWith("http") && localFile == null) {
-                    _authStatusMessage.value = "Не вдалося завантажити трек: помилка мережі"
-                    return@launch
-                }
-
-                val localPath = localFile?.absolutePath
-
-                db.cachedTrackDao().insertTrack(
-                    CachedTrackEntity(
-                        id = track.id,
-                        title = track.title,
-                        artist = track.artist,
-                        localFilePath = localPath,
-                        originalUrl = track.audioUrl,
-                        artworkUrl = track.artworkUrl, // Fix #14: save artworkUrl
-                        durationMs = track.durationMs,
-                        cachedAtTimestamp = System.currentTimeMillis()
-                    )
+                _authStatusMessage.value = "Завантаження: ${track.title} розпочато..."
+                val downloadedFile = com.musicplayer.android.core.audio.TrackDownloadManager.downloadTrackToDevice(
+                    context = getApplication(),
+                    track = track,
+                    backendBaseUrl = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL,
+                    onProgress = { progress ->
+                        val current = _downloadProgress.value.toMutableMap()
+                        current[track.id] = progress
+                        _downloadProgress.value = current
+                    }
                 )
-                _authStatusMessage.value = "Трек збережено офлайн"
+
+                if (downloadedFile != null && downloadedFile.exists() && downloadedFile.length() >= 51_200L) {
+                    db.cachedTrackDao().insertTrack(
+                        CachedTrackEntity(
+                            id = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            localFilePath = downloadedFile.absolutePath,
+                            originalUrl = track.audioUrl,
+                            artworkUrl = track.artworkUrl,
+                            durationMs = track.durationMs,
+                            cachedAtTimestamp = System.currentTimeMillis()
+                        )
+                    )
+                    _authStatusMessage.value = "Завантажено на пристрій: ${track.artist} - ${track.title}"
+                } else {
+                    _authStatusMessage.value = "Не вдалося завантажити трек: помилка мережі"
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
-                // Clean up on cancel
                 throw e
             } catch (e: Exception) {
-                android.util.Log.e("MainPlayerViewModel", "Error caching track: ${e.message}", e)
+                android.util.Log.e("MainPlayerViewModel", "Error downloading track: ${e.message}", e)
                 _authStatusMessage.value = "Помилка завантаження: ${e.message}"
             } finally {
                 activeDownloadJobs.remove(track.id)
@@ -1743,6 +1796,9 @@ class MainPlayerViewModel(
         }
         activeDownloadJobs[track.id] = job
     }
+
+    /** Backwards compatibility alias for caching/downloading */
+    fun cacheTrack(track: AudioTrack) = downloadTrackToDevice(track)
 
     fun cancelDownload(trackId: String) {
         activeDownloadJobs[trackId]?.cancel()

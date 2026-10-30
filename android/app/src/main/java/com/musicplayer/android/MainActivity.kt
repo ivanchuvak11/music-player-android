@@ -26,6 +26,8 @@ import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.NorthWest
+import androidx.compose.material.icons.rounded.Refresh
+import com.musicplayer.android.ui.components.SimilarTrackCard
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Checklist
@@ -159,6 +161,9 @@ fun PlayerCoreScreen() {
     val localPlaylists by viewModel.localPlaylists.collectAsState()
     val autoplayEnabled by viewModel.autoplayEnabled.collectAsState()
     val isLoadingAutoplay by viewModel.isLoadingAutoplay.collectAsState()
+    val homeSimilarTracks by viewModel.homeSimilarTracks.collectAsState()
+    val homeSimilarSeedTitle by viewModel.homeSimilarSeedTitle.collectAsState()
+    val isHomeSimilarLoading by viewModel.isHomeSimilarLoading.collectAsState()
 
     // Navigation and Dialog States
     var currentTab by remember { mutableStateOf(NavigationTab.HOME) }
@@ -857,6 +862,91 @@ fun PlayerCoreScreen() {
                                                 isCurrentTrack = isCurrent,
                                                 isPlayingThisTrack = isPlaying
                                             )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Section: Variant 2 — Contextual Similar Tracks (YouTube + SoundCloud)
+                            if (isHomeSimilarLoading || homeSimilarTracks.isNotEmpty()) {
+                                item(key = "home_similar_context_section") {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = "✨ Схоже за контекстом",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 18.sp,
+                                                color = DarkRefTheme.TextPrimary
+                                            )
+                                            if (!homeSimilarSeedTitle.isNullOrBlank()) {
+                                                Text(
+                                                    text = "На основі: $homeSimilarSeedTitle",
+                                                    fontSize = 12.sp,
+                                                    color = DarkRefTheme.AccentMint.copy(alpha = 0.85f),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+
+                                        IconButton(
+                                            onClick = { viewModel.refreshHomeSimilarTracks() },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            if (isHomeSimilarLoading) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(18.dp),
+                                                    color = DarkRefTheme.AccentMint,
+                                                    strokeWidth = 2.dp
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Rounded.Refresh,
+                                                    contentDescription = "Оновити рекомендації",
+                                                    tint = DarkRefTheme.TextSecondary,
+                                                    modifier = Modifier.size(20.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    if (homeSimilarTracks.isNotEmpty()) {
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                        ) {
+                                            items(
+                                                items = homeSimilarTracks,
+                                                key = { "sim_${it.id}" },
+                                                contentType = { "similar_card" }
+                                            ) { track ->
+                                                val isCurrent = areTrackIdsEqual(currentOrRememberedTrack?.id, track.id)
+                                                val isPlaying = isCurrent && isPlaybackPlaying
+                                                SimilarTrackCard(
+                                                    track = track,
+                                                    isCurrentTrack = isCurrent,
+                                                    isPlaying = isPlaying,
+                                                    isFavorite = track.id in favoriteTrackIds,
+                                                    onPlay = {
+                                                        handleTrackPlayPause(track) {
+                                                            playOnlineSafely {
+                                                                val idx = homeSimilarTracks.indexOf(track).coerceAtLeast(0)
+                                                                viewModel.playQueue(homeSimilarTracks, idx)
+                                                                showNowPlayingSheet = true
+                                                            }
+                                                        }
+                                                    },
+                                                    onToggleFavorite = { viewModel.toggleLocalFavorite(track) },
+                                                    onDownload = { viewModel.downloadTrackToDevice(track) }
+                                                )
+                                            }
                                         }
                                     }
                                 }

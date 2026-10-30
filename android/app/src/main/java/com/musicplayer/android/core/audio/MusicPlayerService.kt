@@ -3,6 +3,7 @@ package com.musicplayer.android.core.audio
 import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import java.io.File
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
@@ -15,6 +16,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.musicplayer.android.MainActivity
+import com.musicplayer.android.core.database.AppDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -33,7 +35,6 @@ import kotlinx.coroutines.launch
 class MusicPlayerService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
-    // Bound to the service lifecycle — cancelled in onDestroy()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     @OptIn(UnstableApi::class)
@@ -56,6 +57,22 @@ class MusicPlayerService : MediaSessionService() {
                         return@Resolver dataSpec.buildUpon()
                             .setUri(Uri.fromFile(offlineFile))
                             .build()
+                    }
+
+                    // 1b. Перевіряємо, чи збережено файл на пристрої у Room CachedTrackDao
+                    try {
+                        val db = AppDatabase.getDatabase(this@MusicPlayerService)
+                        val cachedEntity = db.cachedTrackDao().getTrackByIdDirect(rawKey)
+                        if (cachedEntity?.localFilePath != null) {
+                            val deviceFile = File(cachedEntity.localFilePath)
+                            if (deviceFile.exists() && deviceFile.length() >= 51_200L) {
+                                return@Resolver dataSpec.buildUpon()
+                                    .setUri(Uri.fromFile(deviceFile))
+                                    .build()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w("MusicPlayerService", "Could not check cached track in DB: ${e.message}")
                     }
                 }
 
