@@ -20,31 +20,16 @@ class AuthInterceptor : Interceptor {
 
     var onUnauthorizedListener: (() -> Unit)? = null
 
-    private val isHandling401 = java.util.concurrent.atomic.AtomicBoolean(false)
-
     override fun intercept(chain: Interceptor.Chain): Response {
         val original = chain.request()
         val builder = original.newBuilder()
 
         val token = authToken
         if (!token.isNullOrBlank()) {
-            builder.addHeader("Authorization", "Bearer $token")
+            builder.header("Authorization", "Bearer $token")
         }
 
-        val response = chain.proceed(builder.build())
-        if (response.code == 401 && !token.isNullOrBlank()) {
-            if (isHandling401.compareAndSet(false, true)) {
-                try {
-                    onUnauthorizedListener?.invoke()
-                } finally {
-                    // Reset after 2 seconds to avoid rapid duplicate firings
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        isHandling401.set(false)
-                    }, 2000L)
-                }
-            }
-        }
-        return response
+        return chain.proceed(builder.build())
     }
 }
 
@@ -54,14 +39,45 @@ object NetworkClient {
 
     val authInterceptor = AuthInterceptor()
 
+    @Volatile
+    private var currentBaseUrl: String = DEFAULT_BASE_URL
+
+    @Volatile
+    private var sessionStore: com.musicplayer.android.core.session.SessionManager? = null
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
     }
 
+    private val tokenStoreBridge = object : AuthTokenStore {
+        override fun getAccessToken(): String? =
+            authInterceptor.authToken?.takeIf { it.isNotBlank() } ?: sessionStore?.getToken()
+
+        override fun getRefreshToken(): String? = sessionStore?.getRefreshToken()
+
+        override fun saveTokens(accessToken: String, refreshToken: String?) {
+            authInterceptor.authToken = accessToken
+            sessionStore?.updateTokens(accessToken, refreshToken)
+        }
+
+        override fun onRefreshRejected() {
+            authInterceptor.onUnauthorizedListener?.invoke()
+        }
+    }
+
     @Volatile
     private var okHttpClient: OkHttpClient? = null
+
+    fun bindSessionManager(sessionManager: com.musicplayer.android.core.session.SessionManager) {
+        sessionStore = sessionManager
+        val savedToken = sessionManager.getToken()
+        if (!savedToken.isNullOrBlank()) {
+            authInterceptor.authToken = savedToken
+        }
+        currentBaseUrl = sessionManager.getBaseUrl()
+    }
 
     fun getOkHttpClient(context: Context? = null): OkHttpClient {
         return okHttpClient ?: synchronized(this) {
@@ -79,10 +95,23 @@ object NetworkClient {
                     HttpLoggingInterceptor.Level.NONE
                 }
 
+                val refreshClient = OkHttpClient.Builder()
+                    .connectTimeout(15, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .build()
+
+                val authenticator = TokenRefreshAuthenticator(
+                    tokenStore = tokenStoreBridge,
+                    baseUrlProvider = { currentBaseUrl },
+                    json = json,
+                    refreshClient = refreshClient
+                )
+
                 val builder = OkHttpClient.Builder()
                     .connectionPool(okhttp3.ConnectionPool(5, 5, TimeUnit.MINUTES))
                     .retryOnConnectionFailure(true)
                     .addInterceptor(authInterceptor)
+                    .authenticator(authenticator)
                     .addInterceptor(HttpLoggingInterceptor().apply {
                         level = loggingLevel
                     })
@@ -108,6 +137,7 @@ object NetworkClient {
         val contentType = "application/json".toMediaType()
         val client = getOkHttpClient(context)
         val validBaseUrl = if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/"
+        currentBaseUrl = validBaseUrl
         return Retrofit.Builder()
             .baseUrl(validBaseUrl)
             .client(client)

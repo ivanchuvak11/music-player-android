@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.MusicNote
@@ -56,6 +57,7 @@ fun SimilarTrackCard(
     onPlay: () -> Unit,
     onToggleFavorite: () -> Unit,
     onDownload: () -> Unit,
+    isDownloaded: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isYouTube = track.id.startsWith("youtube_")
@@ -199,9 +201,9 @@ fun SimilarTrackCard(
                     modifier = Modifier.size(28.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.Download,
-                        contentDescription = "Завантажити на пристрій",
-                        tint = DarkRefTheme.TextSecondary,
+                        imageVector = if (isDownloaded) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
+                        contentDescription = if (isDownloaded) "Завантажено на пристрій" else "Завантажити на пристрій",
+                        tint = if (isDownloaded) DarkRefTheme.AccentMint else DarkRefTheme.TextSecondary,
                         modifier = Modifier.size(16.dp)
                     )
                 }

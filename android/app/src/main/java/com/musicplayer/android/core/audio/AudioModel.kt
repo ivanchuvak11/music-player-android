@@ -49,6 +49,7 @@ data class AudioTrack(
 
         return MediaItem.Builder()
             .setMediaId(id)
+            .setCustomCacheKey(id)
             .setUri(effectiveUriString)
             .setMediaMetadata(metadata)
             .build()
@@ -223,7 +224,6 @@ data class PlaybackState(
     val hasPrevious: Boolean = false,
     val shuffleModeEnabled: Boolean = false,
     val repeatMode: Int = REPEAT_MODE_OFF,
-    val playbackSpeed: Float = 1.0f,
     val errorMessage: String? = null
 ) {
     companion object {
@@ -318,7 +318,18 @@ internal fun calculateSearchRelevanceScoreWithMetadata(
         if (s > 0) (s - 50).coerceAtLeast(1) else -1
     } else -1
 
-    val maxScore = maxOf(nativeScore, transScore, flippedScore)
+    var maxScore = maxOf(nativeScore, transScore, flippedScore)
+    if (maxScore < 450) {
+        for (variant in MultilingualSearchHelper.expandLocalQueryVariants(query)) {
+            val variantScore = calculateSingleQueryRelevanceWithMetadata(variant, metadata)
+            if (variantScore >= 0) {
+                val adjusted = (variantScore - 60).coerceAtLeast(1)
+                if (adjusted > maxScore) {
+                    maxScore = adjusted
+                }
+            }
+        }
+    }
     return maxScore
 }
 

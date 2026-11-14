@@ -23,6 +23,9 @@ interface CachedTrackDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTrack(track: CachedTrackEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMetadataIfAbsent(track: CachedTrackEntity)
+
     @Query("DELETE FROM cached_tracks WHERE id = :id")
     suspend fun deleteTrack(id: String)
 

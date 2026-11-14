@@ -21,13 +21,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NorthWest
 import androidx.compose.material.icons.rounded.Refresh
 import com.musicplayer.android.ui.components.SimilarTrackCard
+import androidx.compose.material.icons.rounded.BarChart
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Checklist
@@ -42,13 +46,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 
@@ -148,6 +155,7 @@ fun PlayerCoreScreen() {
     val trendingOnlineTracks by viewModel.trendingOnlineTracks.collectAsState()
     val searchUiResults by viewModel.searchUiResults.collectAsState()
     val searchSuggestions by viewModel.searchSuggestions.collectAsState()
+    val searchHistory by viewModel.searchHistory.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
     val authStatus by viewModel.authStatusMessage.collectAsState()
     val onlineSearchError by viewModel.onlineSearchError.collectAsState()
@@ -164,18 +172,23 @@ fun PlayerCoreScreen() {
     val homeSimilarTracks by viewModel.homeSimilarTracks.collectAsState()
     val homeSimilarSeedTitle by viewModel.homeSimilarSeedTitle.collectAsState()
     val isHomeSimilarLoading by viewModel.isHomeSimilarLoading.collectAsState()
+    val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
 
     // Navigation and Dialog States
     var currentTab by remember { mutableStateOf(NavigationTab.HOME) }
+    val curatedPlaylists by viewModel.curatedPlaylists.collectAsState()
     var showAccountDialog by remember { mutableStateOf(false) }
     var showEqualizerDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showStatsDialog by remember { mutableStateOf(false) }
+    var showExternalPlaylistsDialog by remember { mutableStateOf(false) }
     var showNowPlayingSheet by remember { mutableStateOf(false) }
     var similarTracksSeedTrack by remember { mutableStateOf<AudioTrack?>(null) }
     var tracksToAddToPlaylist by remember { mutableStateOf<List<AudioTrack>?>(null) }
 
     // Search and Selection States
     var unifiedSearchQuery by remember { mutableStateOf("") }
+    var isSearchFocused by remember { mutableStateOf(false) }
     var searchSourceFilter by remember { mutableStateOf(SearchSourceFilter.ALL) }
     var isMultiSelectMode by remember { mutableStateOf(false) }
     var selectedTracks by remember { mutableStateOf(setOf<AudioTrack>()) }
@@ -279,6 +292,9 @@ fun PlayerCoreScreen() {
     val currentOrRememberedTrack = currentPlayingTrack ?: rememberedTrack
 
     val handleTrackPlayPause: (AudioTrack, () -> Unit) -> Unit = { track, defaultStartQueue ->
+        if (unifiedSearchQuery.isNotBlank()) {
+            viewModel.saveSearchToHistory(unifiedSearchQuery)
+        }
         val isCurrent = areTrackIdsEqual(currentPlayingTrack?.id, track.id) ||
                 (currentPlayingTrack == null && areTrackIdsEqual(rememberedTrack?.id, track.id))
         if (isCurrent) {
@@ -289,10 +305,12 @@ fun PlayerCoreScreen() {
     }
 
     val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
-    BackHandler(enabled = unifiedSearchQuery.isNotEmpty()) {
+    BackHandler(enabled = unifiedSearchQuery.isNotEmpty() || isSearchFocused) {
         unifiedSearchQuery = ""
         searchSourceFilter = SearchSourceFilter.ALL
+        keyboardController?.hide()
         focusManager.clearFocus()
     }
 
@@ -357,7 +375,10 @@ fun PlayerCoreScreen() {
                                                 .fillMaxWidth()
                                                 .clickable {
                                                     unifiedSearchQuery = suggestion
+                                                    viewModel.saveSearchToHistory(suggestion)
                                                     viewModel.updateSearchQuery(suggestion)
+                                                    keyboardController?.hide()
+                                                    focusManager.clearFocus()
                                                 }
                                                 .padding(horizontal = 14.dp, vertical = 9.dp),
                                             verticalAlignment = Alignment.CenterVertically
@@ -459,6 +480,34 @@ fun PlayerCoreScreen() {
                                     unselectedBorderColor = Color(0xFFFF7700).copy(alpha = 0.45f),
                                     unselectedTextColor = Color(0xFFFF9436),
                                     onClick = { searchSourceFilter = SearchSourceFilter.SOUNDCLOUD }
+                                )
+                            }
+                        }
+                    }
+
+                    val detectedPlaylistRef = com.musicplayer.android.core.audio.ExternalPlaylistService.parsePlaylistUrlOrId(unifiedSearchQuery)
+                    if (detectedPlaylistRef != null) {
+                        item(key = "search_detected_playlist_banner") {
+                            val srcLabel = if (detectedPlaylistRef.source == "soundcloud") "SoundCloud" else "YouTube"
+                            OutlinedButton(
+                                onClick = {
+                                    viewModel.openExternalPlaylist(
+                                        urlOrId = detectedPlaylistRef.canonicalUrl,
+                                        sourceHint = detectedPlaylistRef.source
+                                    )
+                                    showExternalPlaylistsDialog = true
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = stringResource(R.string.playlist_detected_banner, srcLabel),
+                                    fontSize = 13.sp
                                 )
                             }
                         }
@@ -896,7 +945,7 @@ fun PlayerCoreScreen() {
                                         }
 
                                         IconButton(
-                                            onClick = { viewModel.refreshHomeSimilarTracks() },
+                                            onClick = { viewModel.refreshHomeSimilarTracks(forceRefresh = true) },
                                             modifier = Modifier.size(36.dp)
                                         ) {
                                             if (isHomeSimilarLoading) {
@@ -934,6 +983,7 @@ fun PlayerCoreScreen() {
                                                     isCurrentTrack = isCurrent,
                                                     isPlaying = isPlaying,
                                                     isFavorite = track.id in favoriteTrackIds,
+                                                    isDownloaded = track.id in downloadedTrackIds,
                                                     onPlay = {
                                                         handleTrackPlayPause(track) {
                                                             playOnlineSafely {
@@ -1010,6 +1060,53 @@ fun PlayerCoreScreen() {
                                             showNowPlayingSheet = true
                                         }
                                     )
+                                }
+                            }
+
+                            item(key = "home_curated_functional_section") {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.header_curated_playlists),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = DarkRefTheme.TextPrimary
+                                        )
+                                        TextButton(onClick = { showExternalPlaylistsDialog = true }) {
+                                            Text(
+                                                text = stringResource(R.string.playlist_import_btn),
+                                                fontSize = 12.sp
+                                            )
+                                        }
+                                    }
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        items(items = curatedPlaylists, key = { "cur_${it.id}" }) { curated ->
+                                            OutlinedButton(
+                                                onClick = {
+                                                    viewModel.openCuratedPlaylistDetails(curated)
+                                                    showExternalPlaylistsDialog = true
+                                                }
+                                            ) {
+                                                Text(text = curated.title, fontSize = 12.sp, color = DarkRefTheme.TextPrimary)
+                                            }
+                                        }
+                                    }
+                                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        items(items = viewModel.musicGenres, key = { "genre_${it.id}" }) { genre ->
+                                            OutlinedButton(
+                                                onClick = {
+                                                    viewModel.openGenrePlaylistDetails(genre)
+                                                    showExternalPlaylistsDialog = true
+                                                }
+                                            ) {
+                                                Text(text = genre.name, fontSize = 11.sp, color = DarkRefTheme.TextSecondary)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1575,6 +1672,19 @@ fun PlayerCoreScreen() {
                                                 Text(stringResource(R.string.btn_create), fontSize = 11.sp, color = DarkRefTheme.BackgroundDark, fontWeight = FontWeight.Bold)
                                             }
                                         }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        OutlinedButton(
+                                            onClick = { showExternalPlaylistsDialog = true },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(stringResource(R.string.playlist_import_btn), fontSize = 12.sp)
+                                        }
                                     }
 
                                     if (localPlaylists.isEmpty()) {
@@ -1734,6 +1844,37 @@ fun PlayerCoreScreen() {
                                 }
                             }
 
+                            // Analytics & Stats (Lab 5)
+                            item {
+                                Surface(
+                                    onClick = { showStatsDialog = true },
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = DarkRefTheme.SurfaceCardElevated,
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.BarChart,
+                                            contentDescription = null,
+                                            tint = DarkRefTheme.AccentMint,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = stringResource(R.string.stats_open_btn),
+                                            color = DarkRefTheme.TextPrimary,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                }
+                            }
+
                             // Autoplay toggle card
                             item {
                                 Surface(
@@ -1839,9 +1980,22 @@ fun PlayerCoreScreen() {
                             color = DarkRefTheme.TextSecondary
                         )
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { isSearchFocused = it.isFocused },
                     shape = RoundedCornerShape(14.dp),
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            val trimmed = unifiedSearchQuery.trim()
+                            if (trimmed.isNotBlank()) {
+                                viewModel.saveSearchToHistory(trimmed)
+                            }
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                        }
+                    ),
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Rounded.Search,
@@ -1857,6 +2011,7 @@ fun PlayerCoreScreen() {
                                 searchSourceFilter = SearchSourceFilter.ALL
                                 viewModel.searchYouTube("")
                                 viewModel.searchSoundCloud("")
+                                keyboardController?.hide()
                                 focusManager.clearFocus()
                             }) {
                                 Icon(
@@ -1878,6 +2033,97 @@ fun PlayerCoreScreen() {
                         cursorColor = DarkRefTheme.AccentMint
                     )
                 )
+
+                if (isSearchFocused && unifiedSearchQuery.isBlank() && searchHistory.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = stringResource(R.string.search_history_title),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = DarkRefTheme.TextSecondary
+                            )
+                            Text(
+                                text = stringResource(R.string.search_history_clear),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = DarkRefTheme.AccentMint,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { viewModel.clearSearchHistory() }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            items(
+                                items = searchHistory,
+                                key = { "hist_$it" }
+                            ) { historyItem ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = DarkRefTheme.SurfaceCardElevated.copy(alpha = 0.95f),
+                                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .clickable {
+                                                    unifiedSearchQuery = historyItem
+                                                    viewModel.saveSearchToHistory(historyItem)
+                                                    viewModel.updateSearchQuery(historyItem)
+                                                }
+                                                .padding(top = 2.dp, bottom = 2.dp, end = 4.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.History,
+                                                contentDescription = null,
+                                                tint = DarkRefTheme.AccentMint,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = historyItem,
+                                                fontSize = 12.5.sp,
+                                                color = DarkRefTheme.TextPrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.widthIn(max = 180.dp)
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { viewModel.removeSearchHistoryItem(historyItem) },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Close,
+                                                contentDescription = stringResource(R.string.search_history_remove),
+                                                tint = DarkRefTheme.TextSecondary,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -1934,7 +2180,16 @@ fun PlayerCoreScreen() {
             viewModel = viewModel,
             currentUser = currentUser,
             authStatus = authStatus,
-            onDismiss = { showAccountDialog = false }
+            onDismiss = { showAccountDialog = false },
+            onOpenStats = { showStatsDialog = true }
+        )
+    }
+
+    if (showStatsDialog) {
+        StatsDialog(
+            viewModel = viewModel,
+            isLoggedIn = currentUser != null,
+            onDismiss = { showStatsDialog = false }
         )
     }
 
@@ -1943,6 +2198,19 @@ fun PlayerCoreScreen() {
             viewModel = viewModel,
             audioEffectsState = audioEffectsState,
             onDismiss = { showEqualizerDialog = false }
+        )
+    }
+
+    if (showExternalPlaylistsDialog) {
+        com.musicplayer.android.ui.screens.ExternalPlaylistsDialog(
+            viewModel = viewModel,
+            favoriteTrackIds = favoriteTrackIds,
+            onAddTrackToPlaylist = { track -> tracksToAddToPlaylist = listOf(track) },
+            onPlaySimilar = { track ->
+                similarTracksSeedTrack = track
+                viewModel.loadSimilarTracks(track)
+            },
+            onDismiss = { showExternalPlaylistsDialog = false }
         )
     }
 

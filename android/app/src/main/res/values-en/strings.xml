@@ -72,8 +72,8 @@
     <!-- EQ Presets & Effects -->
     <string name="equalizer_title">Equalizer &amp; Effects</string>
     <string name="headphones_connected">🎧 Headphones connected</string>
-    <string name="headphones_required">🎧 Headphones only</string>
-    <string name="headphones_warning">Connect headphones (wired, Bluetooth or Type-C) to enable equalizer.</string>
+    <string name="headphones_required">🔊 Device speaker</string>
+    <string name="headphones_warning">Equalizer works on speaker too. Avoid excessive bass boost at maximum speaker volume.</string>
     <string name="equalizer_enable">Enable Equalizer:</string>
     <string name="equalizer_reset">🔄 0 dB</string>
     <string name="equalizer_presets_title">Sound Presets:</string>
@@ -139,4 +139,42 @@
     <string name="sort_artist_asc">Artist</string>
     <string name="sort_duration_desc">Longest</string>
     <string name="sort_duration_asc">Shortest</string>
+
+    <!-- Stats & Analytics (Lab 5) -->
+    <string name="stats_title">Analytics &amp; Stats</string>
+    <string name="stats_subtitle">Activity &amp; platform report</string>
+    <string name="stats_open_btn">Activity Statistics</string>
+    <string name="stats_refresh">Refresh</string>
+    <string name="stats_period_day">Day</string>
+    <string name="stats_period_week">Week</string>
+    <string name="stats_period_month">Month</string>
+    <string name="stats_period_all">All time</string>
+    <string name="stats_user_section">Personal Summary</string>
+    <string name="stats_system_section">System Platform Report</string>
+    <string name="stats_overview_section">Server Overview</string>
+    <string name="stats_top_artists">Your Top Artists</string>
+    <string name="stats_sources">Source Breakdown</string>
+    <string name="stats_recent_activity">Recent Activity</string>
+    <string name="stats_login_prompt">Sign in to view your personal cloud statistics.</string>
+
+    <!-- External & Curated Playlists -->
+    <string name="header_curated_playlists">Curated &amp; Service Playlists</string>
+    <string name="header_genres">Genres &amp; Moods</string>
+    <string name="playlist_import_btn">YouTube / SoundCloud playlists</string>
+    <string name="playlist_import_title">Service Playlists</string>
+    <string name="playlist_search_hint">Search or paste URL (YouTube / SoundCloud set)</string>
+    <string name="playlist_open_url_btn">Open</string>
+    <string name="playlist_save_to_library">Save to library</string>
+    <string name="playlist_saved_toast">Playlist \"%1$s\" saved</string>
+    <string name="playlist_loading_tracks">Loading playlist tracks…</string>
+    <string name="playlist_empty_results">Search playlists by topic or paste a YouTube / SoundCloud playlist link.</string>
+    <string name="playlist_detected_banner">Playlist detected (%1$s) — open tracks</string>
+    <string name="playlist_source_all">All</string>
+    <string name="playlist_source_youtube">YouTube</string>
+    <string name="playlist_source_soundcloud">SoundCloud</string>
+
+    <!-- Smart Search History -->
+    <string name="search_history_title">Recent searches</string>
+    <string name="search_history_clear">Clear</string>
+    <string name="search_history_remove">Remove</string>
 </resources>

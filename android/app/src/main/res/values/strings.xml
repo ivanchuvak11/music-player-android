@@ -72,8 +72,8 @@
     <!-- EQ Presets & Effects -->
     <string name="equalizer_title">Еквалайзер та Ефекти</string>
     <string name="headphones_connected">🎧 Навушники підключено</string>
-    <string name="headphones_required">🎧 Тільки в навушниках</string>
-    <string name="headphones_warning">Підключіть навушники (дротові, Bluetooth або Type-C), щоб увімкнути еквалайзер.</string>
+    <string name="headphones_required">🔊 Динамік пристрою</string>
+    <string name="headphones_warning">Еквалайзер працює і без навушників. На максимальній гучності динаміка не завищуйте бас.</string>
     <string name="equalizer_enable">Увімкнути еквалайзер:</string>
     <string name="equalizer_reset">🔄 0 dB</string>
     <string name="equalizer_presets_title">Пресети звучання:</string>
@@ -139,4 +139,42 @@
     <string name="sort_artist_asc">За виконавцем</string>
     <string name="sort_duration_desc">Найдовші</string>
     <string name="sort_duration_asc">Найкоротші</string>
+
+    <!-- Stats & Analytics (Lab 5) -->
+    <string name="stats_title">Аналітика та Статистика</string>
+    <string name="stats_subtitle">Звіт активності та платформи</string>
+    <string name="stats_open_btn">Статистика активності</string>
+    <string name="stats_refresh">Оновити</string>
+    <string name="stats_period_day">День</string>
+    <string name="stats_period_week">Тиждень</string>
+    <string name="stats_period_month">Місяць</string>
+    <string name="stats_period_all">Весь час</string>
+    <string name="stats_user_section">Персональна статистика</string>
+    <string name="stats_system_section">Системний звіт платформи</string>
+    <string name="stats_overview_section">Огляд сервера</string>
+    <string name="stats_top_artists">Ваші топ виконавці</string>
+    <string name="stats_sources">Розподіл за джерелами</string>
+    <string name="stats_recent_activity">Остання активність</string>
+    <string name="stats_login_prompt">Увійдіть в акаунт, щоб переглядати особисту хмарну статистику.</string>
+
+    <!-- External & Curated Playlists -->
+    <string name="header_curated_playlists">Добірки та плейлисти</string>
+    <string name="header_genres">Жанри та настрої</string>
+    <string name="playlist_import_btn">YouTube / SoundCloud плейлісти</string>
+    <string name="playlist_import_title">Плейлисти сервісів</string>
+    <string name="playlist_search_hint">Пошук або URL (youtube.com/playlist?list=… чи soundcloud.com/…)</string>
+    <string name="playlist_open_url_btn">Відкрити</string>
+    <string name="playlist_save_to_library">Зберегти до моїх</string>
+    <string name="playlist_saved_toast">Плейлист «%1$s» збережено</string>
+    <string name="playlist_loading_tracks">Завантаження треків плейлиста…</string>
+    <string name="playlist_empty_results">Введіть назву плейлиста або вставте посилання YouTube / SoundCloud.</string>
+    <string name="playlist_detected_banner">Знайдено плейлист (%1$s) — відкрити треки</string>
+    <string name="playlist_source_all">Усі</string>
+    <string name="playlist_source_youtube">YouTube</string>
+    <string name="playlist_source_soundcloud">SoundCloud</string>
+
+    <!-- Smart Search History -->
+    <string name="search_history_title">Історія пошуку</string>
+    <string name="search_history_clear">Очистити</string>
+    <string name="search_history_remove">Видалити</string>
 </resources>

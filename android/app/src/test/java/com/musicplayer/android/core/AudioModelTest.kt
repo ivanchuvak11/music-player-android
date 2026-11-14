@@ -370,11 +370,19 @@ class AudioModelTest {
     }
 
     @Test
-    fun testAudioEffectsManagerRejectsEnableWithoutHeadphones() {
-        // Without context/headphones connected, setEnabled(true) must reject enabling
-        val result = com.musicplayer.android.core.audio.AudioEffectsManager.setEnabled(true, null)
-        assertFalse("Equalizer must not enable when headphones are not connected", result)
-        assertFalse("State isEnabled must remain false", com.musicplayer.android.core.audio.AudioEffectsManager.effectsState.value.isEnabled)
+    fun testAudioEffectsManagerAllowsEnableWithoutHeadphones() {
+        try {
+            // Without headphones connected, setEnabled(true) must still allow equalizer activation
+            val result = com.musicplayer.android.core.audio.AudioEffectsManager.setEnabled(true, null)
+            assertTrue("Equalizer must be allowed even when headphones are not connected", result)
+            assertTrue("State isEnabled must become true", com.musicplayer.android.core.audio.AudioEffectsManager.effectsState.value.isEnabled)
+
+            val disabled = com.musicplayer.android.core.audio.AudioEffectsManager.setEnabled(false, null)
+            assertFalse("Equalizer must disable cleanly", disabled)
+            assertFalse("State isEnabled must return to false", com.musicplayer.android.core.audio.AudioEffectsManager.effectsState.value.isEnabled)
+        } finally {
+            com.musicplayer.android.core.audio.AudioEffectsManager.setEnabled(false, null)
+        }
     }
 
     @Test
@@ -436,6 +444,32 @@ class AudioModelTest {
         assertEquals("pl_track_1", plAudioTrack.id)
         assertEquals("http://example.com/pl_art.png", plAudioTrack.artworkUrl)
         assertTrue(plAudioTrack.isLocal)
+    }
+
+    @Test
+    fun testCachedTrackEntityHasValidDownloadedFile() {
+        val metadataOnly = com.musicplayer.android.core.database.CachedTrackEntity(
+            id = "youtube_meta",
+            title = "Search Cache Song",
+            artist = "Artist",
+            localFilePath = null,
+            originalUrl = "https://youtube.com/watch?v=meta",
+            durationMs = 180000L,
+            cachedAtTimestamp = 1000L
+        )
+        assertFalse("Metadata-only row must not appear as downloaded", metadataOnly.hasValidDownloadedFile())
+
+        val missingFile = metadataOnly.copy(localFilePath = "/non/existent/path/song.mp3")
+        assertFalse("Missing disk file must not appear as downloaded", missingFile.hasValidDownloadedFile())
+
+        val tempValidFile = java.io.File.createTempFile("eq_dl_test", ".mp3")
+        try {
+            tempValidFile.writeBytes(ByteArray(52_000) { 1 })
+            val validDownloaded = metadataOnly.copy(localFilePath = tempValidFile.absolutePath)
+            assertTrue("Real file >= 50KB must be detected as downloaded", validDownloaded.hasValidDownloadedFile())
+        } finally {
+            tempValidFile.delete()
+        }
     }
 
     @Test

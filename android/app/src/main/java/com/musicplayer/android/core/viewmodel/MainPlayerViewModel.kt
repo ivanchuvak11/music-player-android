@@ -8,6 +8,11 @@ import com.musicplayer.android.core.audio.AudioEffectsManager
 import com.musicplayer.android.core.audio.AudioEffectsState
 import com.musicplayer.android.core.audio.AudioTrack
 import com.musicplayer.android.core.audio.LocalAudioScanner
+import com.musicplayer.android.core.audio.LrcParser
+import com.musicplayer.android.core.audio.LyricsFetchResult
+import com.musicplayer.android.core.audio.LyricsLine
+import com.musicplayer.android.core.audio.LyricsService
+import com.musicplayer.android.core.audio.LyricsUiState
 import com.musicplayer.android.core.audio.PlaybackState
 import com.musicplayer.android.core.audio.PlayerController
 import com.musicplayer.android.core.audio.PlayerControllerImpl
@@ -32,9 +37,14 @@ import com.musicplayer.android.core.network.NetworkClient
 import com.musicplayer.android.core.network.NetworkConnectivityObserver
 import com.musicplayer.android.core.network.PlaylistDetailDto
 import com.musicplayer.android.core.network.PlaylistSummaryDto
+import com.musicplayer.android.core.network.PublicOverviewDto
 import com.musicplayer.android.core.network.RadioStationDto
+import com.musicplayer.android.core.network.RefreshTokenRequestDto
 import com.musicplayer.android.core.network.RegisterRequestDto
 import com.musicplayer.android.core.network.SoundCloudTrackDto
+import com.musicplayer.android.core.network.SystemReportDto
+import com.musicplayer.android.core.network.TrackSourceResolver
+import com.musicplayer.android.core.network.UserStatsSummaryDto
 import com.musicplayer.android.core.network.YouTubeTrackDto
 import com.musicplayer.android.core.session.SessionManager
 import com.musicplayer.android.core.audio.calculateSearchRelevanceScore
@@ -53,11 +63,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -152,6 +170,42 @@ class MainPlayerViewModel(
         .getAllCachedTracks()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    // Tracks physically downloaded onto device storage (excludes search/suggestion metadata rows)
+    val downloadedTrackIds: StateFlow<Set<String>> = db.cachedTrackDao()
+        .getAllCachedTracks()
+        .map { entries ->
+            entries.asSequence()
+                .filter { it.hasValidDownloadedFile() }
+                .map { it.id }
+                .toSet()
+        }
+        .flowOn(Dispatchers.IO)
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
+
+    // ─── Lab 5: Backend Stats & Analytics ─────────────────────────────────────
+    private val _statsPeriod = MutableStateFlow("week")
+    val statsPeriod: StateFlow<String> = _statsPeriod.asStateFlow()
+
+    private val _userStatsSummary = MutableStateFlow<UserStatsSummaryDto?>(null)
+    val userStatsSummary: StateFlow<UserStatsSummaryDto?> = _userStatsSummary.asStateFlow()
+
+    private val _systemReport = MutableStateFlow<SystemReportDto?>(null)
+    val systemReport: StateFlow<SystemReportDto?> = _systemReport.asStateFlow()
+
+    private val _publicOverview = MutableStateFlow<PublicOverviewDto?>(null)
+    val publicOverview: StateFlow<PublicOverviewDto?> = _publicOverview.asStateFlow()
+
+    private val _statsLoading = MutableStateFlow(false)
+    val statsLoading: StateFlow<Boolean> = _statsLoading.asStateFlow()
+
+    private val _statsError = MutableStateFlow<String?>(null)
+    val statsError: StateFlow<String?> = _statsError.asStateFlow()
+
+    private val localToRemotePlaylistIds = java.util.concurrent.ConcurrentHashMap<Long, Int>()
+    private val playlistSyncMutex = Mutex()
+    private val favoriteSyncMutex = Mutex()
+
     private val _cachedSearchQuery = MutableStateFlow("")
     val cachedSearchQuery: StateFlow<String> = _cachedSearchQuery.asStateFlow()
 
@@ -195,6 +249,7 @@ class MainPlayerViewModel(
     private var youtubeSearchJob: Job? = null
     private var soundCloudSearchJob: Job? = null
     private var lastPositionSaveTimeMs = 0L
+    private var lastSavedQueueSignature: String? = null
 
     // ─── Unified multi-source search state (ТЗ Section 3) ─────────────────────
     private val _unifiedSearchResults = MutableStateFlow<List<com.musicplayer.android.core.audio.UnifiedTrack>>(emptyList())
@@ -226,6 +281,9 @@ class MainPlayerViewModel(
     private val _searchSuggestions = MutableStateFlow<List<String>>(emptyList())
     val searchSuggestions: StateFlow<List<String>> = _searchSuggestions.asStateFlow()
 
+    private val _searchHistory = MutableStateFlow(sessionManager.getSearchHistory())
+    val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
     private var searchPipelineJob: Job? = null
     private var suggestionJob: Job? = null
     // ──────────────────────────────────────────────────────────────────────────
@@ -238,6 +296,33 @@ class MainPlayerViewModel(
     val isLoadingAutoplay: StateFlow<Boolean> = _isLoadingAutoplay.asStateFlow()
 
     private var autoplayJob: Job? = null
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // ─── Synchronized Lyrics (Local .lrc + lrclib.net + Offline Cache) ───────
+    private val lyricsService: LyricsService by lazy {
+        LyricsService(
+            httpClient = NetworkClient.getOkHttpClient(application),
+            cacheRootDir = application.filesDir
+        )
+    }
+
+    private val _lyricsState = MutableStateFlow<LyricsUiState>(LyricsUiState.Idle)
+    val lyricsState: StateFlow<LyricsUiState> = _lyricsState.asStateFlow()
+
+    val activeLyricLineIndex: StateFlow<Int> = combine(
+        _lyricsState,
+        playbackState.map { it.currentPositionMs }.distinctUntilChanged()
+    ) { state, positionMs ->
+        if (state is LyricsUiState.Ready && state.syncedLines.isNotEmpty()) {
+            LrcParser.findActiveLineIndex(state.syncedLines, positionMs)
+        } else {
+            -1
+        }
+    }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Lazily, -1)
+
+    private var lyricsJob: Job? = null
     // ──────────────────────────────────────────────────────────────────────────
 
     // ─── Categories, Curated Playlists & Artists (Core Architecture) ──────────
@@ -257,10 +342,56 @@ class MainPlayerViewModel(
 
     private val _curatedTracksLoading = MutableStateFlow(false)
     val curatedTracksLoading: StateFlow<Boolean> = _curatedTracksLoading.asStateFlow()
+
+    // ─── External & Curated Playlist Browser / Importer ──────────────────────
+    private val _playlistSearchSourceFilter = MutableStateFlow(
+        com.musicplayer.android.core.audio.ExternalPlaylistSource.ALL
+    )
+    val playlistSearchSourceFilter: StateFlow<com.musicplayer.android.core.audio.ExternalPlaylistSource> =
+        _playlistSearchSourceFilter.asStateFlow()
+
+    private val _searchedExternalPlaylists = MutableStateFlow<List<com.musicplayer.android.core.audio.ExternalPlaylistSummary>>(emptyList())
+    val searchedExternalPlaylists: StateFlow<List<com.musicplayer.android.core.audio.ExternalPlaylistSummary>> =
+        _searchedExternalPlaylists.asStateFlow()
+
+    private val _isSearchingExternalPlaylists = MutableStateFlow(false)
+    val isSearchingExternalPlaylists: StateFlow<Boolean> = _isSearchingExternalPlaylists.asStateFlow()
+
+    private val _externalPlaylistSearchError = MutableStateFlow<String?>(null)
+    val externalPlaylistSearchError: StateFlow<String?> = _externalPlaylistSearchError.asStateFlow()
+
+    private val _openedPlaylistDetails = MutableStateFlow<com.musicplayer.android.core.audio.ExternalPlaylistDetails?>(null)
+    val openedPlaylistDetails: StateFlow<com.musicplayer.android.core.audio.ExternalPlaylistDetails?> =
+        _openedPlaylistDetails.asStateFlow()
+
+    private val _isLoadingOpenedPlaylist = MutableStateFlow(false)
+    val isLoadingOpenedPlaylist: StateFlow<Boolean> = _isLoadingOpenedPlaylist.asStateFlow()
+
+    private val _openedPlaylistError = MutableStateFlow<String?>(null)
+    val openedPlaylistError: StateFlow<String?> = _openedPlaylistError.asStateFlow()
+
+    private var externalPlaylistSearchJob: Job? = null
+    private var openPlaylistJob: Job? = null
+    private var lastPlaylistSearchQuery: String = ""
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // ─── Home Contextual Recommendations (Variant 2) ──────────────────
+    private val _homeSimilarTracks = MutableStateFlow<List<AudioTrack>>(emptyList())
+    val homeSimilarTracks: StateFlow<List<AudioTrack>> = _homeSimilarTracks.asStateFlow()
+
+    private val _homeSimilarSeedTitle = MutableStateFlow<String?>(null)
+    val homeSimilarSeedTitle: StateFlow<String?> = _homeSimilarSeedTitle.asStateFlow()
+
+    private val _isHomeSimilarLoading = MutableStateFlow(false)
+    val isHomeSimilarLoading: StateFlow<Boolean> = _isHomeSimilarLoading.asStateFlow()
+
+    private var homeSimilarJob: Job? = null
+    private val homeSimilarCache = java.util.concurrent.ConcurrentHashMap<String, List<AudioTrack>>()
     // ──────────────────────────────────────────────────────────────────────────
 
     init {
-        // Wire automatic 401 Unauthorized handling
+        // Bind SessionManager for automatic JWT refresh and wire 401 expiry fallback
+        NetworkClient.bindSessionManager(sessionManager)
         NetworkClient.authInterceptor.onUnauthorizedListener = {
             handleSessionExpired()
         }
@@ -296,9 +427,30 @@ class MainPlayerViewModel(
         // Fix #10: Debounce media changes by 1500ms to avoid 30 redundant scans per download
         loadLocalTracks()
         loadTrendingOnlineTracks()
+
+        // Automatic Similar Songs (Contextual Recommendations) Observer:
+        // Automatically updates "Схоже за контекстом" whenever a new track plays,
+        // with an 800ms debounce to prevent lag during rapid skipping.
+        var currentSimilarSeedId: String? = null
+        var autoSimilarJob: Job? = null
         viewModelScope.launch {
-            kotlinx.coroutines.delay(1000L)
-            refreshHomeSimilarTracks()
+            playerController.playbackState
+                .map { it.currentTrack }
+                .distinctUntilChanged { old, new -> old?.id == new?.id }
+                .collect { track ->
+                    if (track != null) {
+                        if (track.id != currentSimilarSeedId) {
+                            autoSimilarJob?.cancel()
+                            autoSimilarJob = launch {
+                                kotlinx.coroutines.delay(800L)
+                                currentSimilarSeedId = track.id
+                                refreshHomeSimilarTracks(track)
+                            }
+                        }
+                    } else if (_homeSimilarTracks.value.isEmpty()) {
+                        refreshHomeSimilarTracks(null)
+                    }
+                }
         }
         viewModelScope.launch {
             try {
@@ -319,6 +471,7 @@ class MainPlayerViewModel(
             playerController.playbackState.collect { state ->
                 val track = state.currentTrack
                 if (track != null) {
+                    persistQueueIfChanged(state, track)
                     // Fix #7: Throttle disk writes to at most once per 5 seconds (not every 500ms)
                     val now = System.currentTimeMillis()
                     if ((state.currentPositionMs > 500L || state.isPlaying) &&
@@ -385,6 +538,22 @@ class MainPlayerViewModel(
             }
         }
         // ─────────────────────────────────────────────────────────────────────
+
+        // ─── Auto-load Lyrics when current track changes ──────────────────────
+        viewModelScope.launch {
+            playerController.playbackState
+                .map { it.currentTrack }
+                .distinctUntilChanged { old, new -> old?.id == new?.id }
+                .collect { track ->
+                    if (track == null) {
+                        lyricsJob?.cancel()
+                        _lyricsState.value = LyricsUiState.Idle
+                    } else {
+                        loadLyricsForTrack(track, forceRefresh = false)
+                    }
+                }
+        }
+        // ─────────────────────────────────────────────────────────────────────
     }
 
     private fun handleSessionExpired() {
@@ -392,6 +561,10 @@ class MainPlayerViewModel(
             sessionManager.clearSession()
             NetworkClient.authInterceptor.authToken = null
             _currentUser.value = null
+            _userStatsSummary.value = null
+            _playlists.value = emptyList()
+            _favoriteTracks.value = emptyList()
+            localToRemotePlaylistIds.clear()
             _authStatusMessage.value = "Сесія закінчилась (401). Будь ласка, увійдіть знову"
         }
     }
@@ -491,49 +664,70 @@ class MainPlayerViewModel(
         }
     }
 
-    // ─── Home Contextual Recommendations (Variant 2) ──────────────────
-    private val _homeSimilarTracks = MutableStateFlow<List<AudioTrack>>(emptyList())
-    val homeSimilarTracks: StateFlow<List<AudioTrack>> = _homeSimilarTracks.asStateFlow()
-
-    private val _homeSimilarSeedTitle = MutableStateFlow<String?>(null)
-    val homeSimilarSeedTitle: StateFlow<String?> = _homeSimilarSeedTitle.asStateFlow()
-
-    private val _isHomeSimilarLoading = MutableStateFlow(false)
-    val isHomeSimilarLoading: StateFlow<Boolean> = _isHomeSimilarLoading.asStateFlow()
-
-    private var homeSimilarJob: Job? = null
 
     /**
      * Loads or refreshes the contextual recommendations block on the HOME screen (Variant 2).
      * Automatically picks the best seed: current playing track, most recent history, or first favorite.
      */
-    fun refreshHomeSimilarTracks(seedTrack: AudioTrack? = null) {
+    fun refreshHomeSimilarTracks(seedTrack: AudioTrack? = null, forceRefresh: Boolean = false) {
+        val effectiveSeed = seedTrack
+            ?: playbackState.value.currentTrack
+            ?: playHistory.value.firstOrNull()?.toAudioTrack()
+            ?: localFavorites.value.firstOrNull()?.toAudioTrack()
+            ?: trendingOnlineTracks.value.firstOrNull()
+
+        if (effectiveSeed == null) {
+            _homeSimilarTracks.value = emptyList()
+            _homeSimilarSeedTitle.value = null
+            return
+        }
+
+        val (artist, title) = com.musicplayer.android.core.audio.AutoplayService.extractCleanMetadata(effectiveSeed)
+        _homeSimilarSeedTitle.value = "$artist — $title"
+
+        // 0ms instant cache hit on automatic navigation
+        if (!forceRefresh) {
+            val cached = homeSimilarCache[effectiveSeed.id]
+            if (cached != null && cached.isNotEmpty()) {
+                _homeSimilarTracks.value = cached
+                _isHomeSimilarLoading.value = false
+                return
+            }
+        }
+
         homeSimilarJob?.cancel()
         homeSimilarJob = viewModelScope.launch {
             _isHomeSimilarLoading.value = true
             try {
-                val effectiveSeed = seedTrack
-                    ?: playbackState.value.currentTrack
-                    ?: playHistory.value.firstOrNull()?.toAudioTrack()
-                    ?: localFavorites.value.firstOrNull()?.toAudioTrack()
-                    ?: trendingOnlineTracks.value.firstOrNull()
-
-                if (effectiveSeed == null) {
-                    _homeSimilarTracks.value = emptyList()
-                    _homeSimilarSeedTitle.value = null
-                    return@launch
-                }
-
-                val (artist, title) = com.musicplayer.android.core.audio.AutoplayService.extractCleanMetadata(effectiveSeed)
-                _homeSimilarSeedTitle.value = "$artist — $title"
-
                 val results = com.musicplayer.android.core.audio.AutoplayService.fetchContextualSimilarTracks(
                     seedTrack = effectiveSeed,
                     apiService = apiService,
                     backendBaseUrl = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL,
                     limit = 16
                 )
-                _homeSimilarTracks.value = results
+                if (results.isNotEmpty()) {
+                    homeSimilarCache[effectiveSeed.id] = results
+                    _homeSimilarTracks.value = results
+                    // Persist metadata to Room so stream resolvers know title & artist
+                    try {
+                        for (track in results) {
+                            db.cachedTrackDao().insertMetadataIfAbsent(
+                                CachedTrackEntity(
+                                    id = track.id,
+                                    title = track.title,
+                                    artist = track.artist,
+                                    localFilePath = null,
+                                    originalUrl = track.audioUrl,
+                                    artworkUrl = track.artworkUrl,
+                                    durationMs = track.durationMs,
+                                    cachedAtTimestamp = System.currentTimeMillis()
+                                )
+                            )
+                        }
+                    } catch (e: Exception) {
+                        // ignore DB caching errors
+                    }
+                }
             } catch (e: Exception) {
                 if (e !is kotlinx.coroutines.CancellationException) {
                     android.util.Log.e("MainPlayerViewModel", "Error fetching home similar tracks: ${e.message}")
@@ -651,17 +845,36 @@ class MainPlayerViewModel(
 
     // ─────────────────────────────────────────────────────────────────────────
 
+    private fun persistQueueIfChanged(state: com.musicplayer.android.core.audio.PlaybackState, track: AudioTrack) {
+        if (state.queue.isEmpty()) return
+        val currentIdx = state.queue.indexOfFirst { areTrackIdsEqual(it.id, track.id) }.coerceAtLeast(0)
+        val queueSig = "${state.queue.size}:${state.queue.firstOrNull()?.id}:${state.queue.lastOrNull()?.id}:$currentIdx"
+        if (queueSig != lastSavedQueueSignature) {
+            lastSavedQueueSignature = queueSig
+            sessionManager.savePlaybackQueue(state.queue, currentIdx)
+        }
+    }
+
     // Player Actions
     fun play() {
         if (playbackState.value.currentTrack != null) {
             playerController.play()
         } else {
-            // Memory: Resume track and position that was playing before app was closed!
-            val lastPlayed = sessionManager.getLastPlayedTrack()
-            if (lastPlayed != null) {
-                val (track, pos) = lastPlayed
-                val startPos = if (pos > 1000L && !track.isLiveStream) pos else 0L
-                playerController.playTrack(track, startPos)
+            // Memory: Restore full playback queue, current index, and position from last session
+            val lastSession = sessionManager.getLastPlaybackSession()
+            if (lastSession != null && lastSession.queue.isNotEmpty()) {
+                val targetTrack = lastSession.queue.getOrNull(lastSession.startIndex)
+                val startPos = if (lastSession.positionMs > 1000L && targetTrack?.isLiveStream != true) {
+                    lastSession.positionMs
+                } else {
+                    0L
+                }
+                playerController.setQueue(
+                    tracks = lastSession.queue,
+                    startIndex = lastSession.startIndex,
+                    autoPlay = true,
+                    startPositionMs = startPos
+                )
             } else {
                 // If nothing in memory, start playing the first local song!
                 val firstTrack = _localTracks.value.firstOrNull()
@@ -677,11 +890,14 @@ class MainPlayerViewModel(
     fun getLastPlayedTrack(): Pair<AudioTrack, Long>? = sessionManager.getLastPlayedTrack()
 
     fun pause() {
-        // Immediately persist current position upon pausing to never lose playback state
+        // Immediately persist current position and queue upon pausing to never lose playback state
         val state = playbackState.value
         val track = state.currentTrack
-        if (track != null && state.currentPositionMs > 0L) {
-            sessionManager.saveLastPlayedTrack(track, state.currentPositionMs)
+        if (track != null) {
+            persistQueueIfChanged(state, track)
+            if (state.currentPositionMs > 0L) {
+                sessionManager.saveLastPlayedTrack(track, state.currentPositionMs)
+            }
         }
         playerController.pause()
     }
@@ -704,10 +920,78 @@ class MainPlayerViewModel(
     }
 
     fun playPrevious() {
-        playerController.playPrevious()
+        val state = playbackState.value
+        if (state.hasPrevious) {
+            playerController.playPrevious()
+            return
+        }
+        val current = state.currentTrack
+        val prevFromHistory = playHistory.value
+            .firstOrNull { entry -> current == null || !areTrackIdsEqual(entry.trackId, current.id) }
+            ?.toAudioTrack()
+        if (prevFromHistory != null) {
+            val baseQueue = state.queue.ifEmpty { listOfNotNull(current) }
+            val updatedQueue = if (baseQueue.any { areTrackIdsEqual(it.id, prevFromHistory.id) }) {
+                baseQueue
+            } else {
+                listOf(prevFromHistory) + baseQueue
+            }
+            val prevIdx = updatedQueue
+                .indexOfFirst { areTrackIdsEqual(it.id, prevFromHistory.id) }
+                .coerceAtLeast(0)
+            playerController.setQueue(updatedQueue, startIndex = prevIdx, autoPlay = true)
+        } else {
+            playerController.playPrevious()
+        }
     }
 
     fun seekTo(positionMs: Long) = playerController.seekTo(positionMs)
+
+    fun loadLyricsForCurrentTrack(forceRefresh: Boolean = false) {
+        val track = playbackState.value.currentTrack ?: return
+        loadLyricsForTrack(track, forceRefresh)
+    }
+
+    fun seekToLyricLine(line: LyricsLine) {
+        seekTo(line.timestampMs)
+    }
+
+    fun importLyricsForCurrentTrack(lrcContent: String) {
+        val track = playbackState.value.currentTrack ?: return
+        lyricsJob?.cancel()
+        lyricsJob = viewModelScope.launch {
+            _lyricsState.value = LyricsUiState.Loading(track.id)
+            when (val result = lyricsService.saveCustomLrc(track, lrcContent)) {
+                is LyricsFetchResult.Found -> _lyricsState.value = LyricsUiState.Ready(
+                    trackId = track.id,
+                    syncedLines = result.syncedLines,
+                    plainLyrics = result.plainLyrics,
+                    source = result.source,
+                    isInstrumental = result.isInstrumental
+                )
+                LyricsFetchResult.NotFound -> _lyricsState.value = LyricsUiState.NotFound(track.id)
+                is LyricsFetchResult.Error -> _lyricsState.value = LyricsUiState.Error(track.id, result.message)
+            }
+        }
+    }
+
+    private fun loadLyricsForTrack(track: AudioTrack, forceRefresh: Boolean) {
+        lyricsJob?.cancel()
+        lyricsJob = viewModelScope.launch {
+            _lyricsState.value = LyricsUiState.Loading(track.id)
+            when (val result = lyricsService.fetchLyrics(track, forceRefresh = forceRefresh)) {
+                is LyricsFetchResult.Found -> _lyricsState.value = LyricsUiState.Ready(
+                    trackId = track.id,
+                    syncedLines = result.syncedLines,
+                    plainLyrics = result.plainLyrics,
+                    source = result.source,
+                    isInstrumental = result.isInstrumental
+                )
+                LyricsFetchResult.NotFound -> _lyricsState.value = LyricsUiState.NotFound(track.id)
+                is LyricsFetchResult.Error -> _lyricsState.value = LyricsUiState.Error(track.id, result.message)
+            }
+        }
+    }
 
     fun toggleShuffle() {
         val nextMode = !playbackState.value.shuffleModeEnabled
@@ -878,18 +1162,14 @@ class MainPlayerViewModel(
     }
 
     fun setLoudnessEnhancerGain(gainMb: Int) {
-        AudioEffectsManager.setLoudnessEnhancerGain(gainMb)
+        AudioEffectsManager.setLoudnessEnhancerGain(gainMb, getApplication())
     }
 
     fun resetEqualizer() {
         AudioEffectsManager.resetToFlat(getApplication())
     }
 
-    // Playback Speed & Queue Management
-    fun setPlaybackSpeed(speed: Float) {
-        playerController.setPlaybackSpeed(speed)
-    }
-
+    // Queue Management
     fun addToQueue(track: AudioTrack) {
         playerController.addToQueue(track)
     }
@@ -930,6 +1210,7 @@ class MainPlayerViewModel(
             val isFav = localFavorites.value.any { it.id == track.id }
             if (isFav) {
                 db.favoriteTrackDao().deleteFavorite(track.id)
+                syncFavoriteRemovalToBackend(track)
             } else {
                 db.favoriteTrackDao().insertFavorite(
                     FavoriteTrackEntity(
@@ -941,6 +1222,69 @@ class MainPlayerViewModel(
                         durationMs = track.durationMs
                     )
                 )
+                syncFavoriteAdditionToBackend(track)
+            }
+        }
+    }
+
+    private suspend fun syncFavoriteAdditionToBackend(track: AudioTrack) {
+        if (!sessionManager.isLoggedIn()) return
+        val ref = TrackSourceResolver.resolveTrackRef(track) ?: return
+        favoriteSyncMutex.withLock {
+            if (!sessionManager.isLoggedIn()) return@withLock
+            try {
+                val resp = apiService.addFavoriteTrack(
+                    AddFavoriteTrackRequestDto(
+                        source = ref.source,
+                        externalId = ref.externalId,
+                        title = ref.title,
+                        artist = ref.artist,
+                        artworkUrl = ref.artworkUrl,
+                        durationMs = ref.durationMs
+                    )
+                )
+                if (resp.isSuccessful || resp.code() == 409) {
+                    val listResp = apiService.getFavoriteTracks()
+                    if (listResp.isSuccessful) {
+                        _favoriteTracks.value = listResp.body().orEmpty()
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                android.util.Log.w("MainPlayerViewModel", "Favorite cloud add sync skipped: ${e.message}")
+            }
+        }
+    }
+
+    private suspend fun syncFavoriteRemovalToBackend(track: AudioTrack) {
+        if (!sessionManager.isLoggedIn()) return
+        val ref = TrackSourceResolver.resolveTrackRef(track) ?: return
+        favoriteSyncMutex.withLock {
+            if (!sessionManager.isLoggedIn()) return@withLock
+            try {
+                var currentRemote = _favoriteTracks.value
+                if (currentRemote.isEmpty() || currentRemote.none {
+                        it.source.equals(ref.source, ignoreCase = true) && it.externalId == ref.externalId
+                    }) {
+                    val listResp = apiService.getFavoriteTracks()
+                    if (listResp.isSuccessful) {
+                        currentRemote = listResp.body().orEmpty()
+                        _favoriteTracks.value = currentRemote
+                    }
+                }
+                val remoteMatch = currentRemote.firstOrNull {
+                    it.source.equals(ref.source, ignoreCase = true) && it.externalId == ref.externalId
+                } ?: return@withLock
+                val delResp = apiService.removeFavoriteTrack(remoteMatch.id)
+                if (delResp.isSuccessful) {
+                    val refreshed = apiService.getFavoriteTracks()
+                    if (refreshed.isSuccessful) {
+                        _favoriteTracks.value = refreshed.body().orEmpty()
+                    }
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                android.util.Log.w("MainPlayerViewModel", "Favorite cloud remove sync skipped: ${e.message}")
             }
         }
     }
@@ -1047,9 +1391,24 @@ class MainPlayerViewModel(
         soundCloudSearchJob = viewModelScope.launch {
             delay(400L)
             try {
-                val resp = apiService.searchSoundCloudTracks(query.trim(), limit)
+                val trimmed = query.trim()
+                val resp = apiService.searchSoundCloudTracks(trimmed, limit)
                 if (resp.isSuccessful) {
-                    _searchedSoundCloudTracks.value = resp.body().orEmpty()
+                    var tracks = resp.body().orEmpty()
+                    if (tracks.size < minOf(3, limit)) {
+                        val altQuery = com.musicplayer.android.core.audio.MultilingualSearchHelper
+                            .buildOnlineFallbackQueries(trimmed)
+                            .firstOrNull()
+                        if (!altQuery.isNullOrBlank()) {
+                            val altResp = runCatching { apiService.searchSoundCloudTracks(altQuery, limit) }.getOrNull()
+                            if (altResp != null && altResp.isSuccessful) {
+                                tracks = (tracks + altResp.body().orEmpty())
+                                    .distinctBy { it.externalId }
+                                    .take(limit)
+                            }
+                        }
+                    }
+                    _searchedSoundCloudTracks.value = tracks
                     _onlineSearchError.value = null
                 }
             } catch (e: CancellationException) {
@@ -1168,6 +1527,22 @@ class MainPlayerViewModel(
         refreshOnlineSearchResults(_searchQuery.value)
     }
 
+    fun saveSearchToHistory(query: String) {
+        val clean = query.trim()
+        if (clean.length < 2) return
+        if (clean.startsWith("http://", ignoreCase = true) || clean.startsWith("https://", ignoreCase = true)) return
+        _searchHistory.value = sessionManager.addSearchHistory(clean)
+    }
+
+    fun removeSearchHistoryItem(query: String) {
+        _searchHistory.value = sessionManager.removeSearchHistoryItem(query)
+    }
+
+    fun clearSearchHistory() {
+        sessionManager.clearSearchHistory()
+        _searchHistory.value = emptyList()
+    }
+
     /**
      * Updates unified search query and performs lightning-fast background filtering
      * on Dispatchers.Default. Zero UI thread work ensures 120 FPS typing.
@@ -1190,8 +1565,11 @@ class MainPlayerViewModel(
         // Real-time suggestions from Google/YouTube Suggest API (~50ms)
         suggestionJob?.cancel()
         suggestionJob = viewModelScope.launch(Dispatchers.IO) {
+            delay(100L)
             val suggestions = com.musicplayer.android.core.audio.SearchSuggestionService.getSuggestions(q)
-            _searchSuggestions.value = suggestions
+            if (_searchQuery.value == q) {
+                _searchSuggestions.value = suggestions
+            }
         }
 
         searchPipelineJob?.cancel()
@@ -1501,10 +1879,84 @@ class MainPlayerViewModel(
             try {
                 val resp = apiService.getPlaylists()
                 if (resp.isSuccessful) {
-                    _playlists.value = resp.body().orEmpty()
+                    val remotePlaylists = resp.body().orEmpty()
+                    _playlists.value = remotePlaylists
+                    if (sessionManager.isLoggedIn() && remotePlaylists.isNotEmpty()) {
+                        syncCloudPlaylistsToLocal(remotePlaylists)
+                    }
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 e.printStackTrace()
+            }
+        }
+    }
+
+    private suspend fun syncCloudPlaylistsToLocal(remotePlaylists: List<PlaylistSummaryDto>) {
+        val remoteDetails = supervisorScope {
+            remotePlaylists.map { summary ->
+                summary to async(Dispatchers.IO) {
+                    runCatching { apiService.getPlaylist(summary.id) }.getOrNull()
+                        ?.takeIf { it.isSuccessful }
+                        ?.body()
+                }
+            }.map { (summary, deferred) -> summary to deferred.await() }
+        }
+
+        val baseUrl = sessionManager.getBaseUrl()
+        withContext(Dispatchers.IO) {
+            playlistSyncMutex.withLock {
+                if (!sessionManager.isLoggedIn()) return@withLock
+                val localList = db.localPlaylistDao().getAllPlaylists().first().toMutableList()
+                for ((summary, detail) in remoteDetails) {
+                    val cleanName = summary.name.trim().ifBlank { "Playlist" }
+                    val mappedLocalId = localToRemotePlaylistIds.entries.firstOrNull { it.value == summary.id }?.key
+                    val matchedLocal = mappedLocalId?.let { id -> localList.firstOrNull { it.id == id } }
+                        ?: localList.firstOrNull { it.name.trim().equals(cleanName, ignoreCase = true) }
+                    val localPlaylistId = matchedLocal?.id ?: run {
+                        val created = LocalPlaylistEntity(name = cleanName)
+                        val newId = db.localPlaylistDao().insertPlaylist(created)
+                        localList.add(created.copy(id = newId))
+                        newId
+                    }
+                    localToRemotePlaylistIds[localPlaylistId] = summary.id
+
+                    val remoteTracks = detail?.tracks.orEmpty()
+                    if (remoteTracks.isEmpty()) continue
+                    val existingIds = db.localPlaylistDao().getTracksForPlaylistSync(localPlaylistId)
+                        .map { it.trackId }
+                        .toMutableList()
+                    val toInsert = remoteTracks.mapNotNull { remoteTrack ->
+                        val track = TrackSourceResolver.buildAudioTrackFromCloud(
+                            source = remoteTrack.source,
+                            externalId = remoteTrack.externalId,
+                            rawTrackId = remoteTrack.trackId,
+                            title = remoteTrack.title,
+                            artist = remoteTrack.artist,
+                            artworkUrl = remoteTrack.artworkUrl,
+                            rawAudioUrl = remoteTrack.audioUrl,
+                            durationMs = remoteTrack.durationMs,
+                            baseUrl = baseUrl
+                        ) ?: return@mapNotNull null
+                        if (existingIds.any { areTrackIdsEqual(it, track.id) }) {
+                            return@mapNotNull null
+                        }
+                        existingIds.add(track.id)
+                        LocalPlaylistTrackEntity(
+                            playlistId = localPlaylistId,
+                            trackId = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            audioUrl = track.audioUrl,
+                            artworkUrl = track.artworkUrl,
+                            durationMs = track.durationMs,
+                            isLocal = false
+                        )
+                    }
+                    if (toInsert.isNotEmpty()) {
+                        db.localPlaylistDao().insertTracks(toInsert)
+                    }
+                }
             }
         }
     }
@@ -1514,10 +1966,14 @@ class MainPlayerViewModel(
     }
 
     fun createLocalPlaylist(name: String) {
-        if (name.isBlank()) return
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
         viewModelScope.launch {
             try {
-                db.localPlaylistDao().insertPlaylist(LocalPlaylistEntity(name = name.trim()))
+                val localId = db.localPlaylistDao().insertPlaylist(LocalPlaylistEntity(name = trimmed))
+                if (sessionManager.isLoggedIn()) {
+                    ensureRemotePlaylistId(localId, trimmed)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -1527,9 +1983,14 @@ class MainPlayerViewModel(
     fun deleteLocalPlaylist(playlistId: Long) {
         viewModelScope.launch {
             try {
+                val playlistName = db.localPlaylistDao().getPlaylistById(playlistId)?.name
                 // Fix #30: ForeignKey CASCADE deletes playlist tracks automatically
                 db.localPlaylistDao().deletePlaylist(playlistId)
                 db.localPlaylistDao().deleteTracksForPlaylist(playlistId)
+
+                if (sessionManager.isLoggedIn()) {
+                    syncPlaylistDeletionToBackend(playlistId, playlistName)
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -1557,6 +2018,16 @@ class MainPlayerViewModel(
                     )
                 }
                 db.localPlaylistDao().insertTracks(entities)
+
+                if (sessionManager.isLoggedIn()) {
+                    val playlistName = db.localPlaylistDao().getPlaylistById(playlistId)?.name
+                    if (!playlistName.isNullOrBlank()) {
+                        val remoteId = ensureRemotePlaylistId(playlistId, playlistName)
+                        if (remoteId != null) {
+                            syncTracksToRemotePlaylist(remoteId, tracks)
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -1564,10 +2035,11 @@ class MainPlayerViewModel(
     }
 
     fun createLocalPlaylistWithTracks(name: String, tracks: List<AudioTrack>, onCreated: ((Long) -> Unit)? = null) {
-        if (name.isBlank()) return
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
         viewModelScope.launch {
             try {
-                val newPl = LocalPlaylistEntity(name = name.trim())
+                val newPl = LocalPlaylistEntity(name = trimmed)
                 val plId = db.localPlaylistDao().insertPlaylist(newPl)
                 if (tracks.isNotEmpty()) {
                     val entities = tracks.map { track ->
@@ -1585,6 +2057,13 @@ class MainPlayerViewModel(
                     db.localPlaylistDao().insertTracks(entities)
                 }
                 onCreated?.invoke(plId)
+
+                if (sessionManager.isLoggedIn()) {
+                    val remoteId = ensureRemotePlaylistId(plId, trimmed)
+                    if (remoteId != null && tracks.isNotEmpty()) {
+                        syncTracksToRemotePlaylist(remoteId, tracks)
+                    }
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -1594,10 +2073,15 @@ class MainPlayerViewModel(
     fun removeTrackFromLocalPlaylist(playlistId: Long, trackId: String, rowId: Long = 0L) {
         viewModelScope.launch {
             try {
+                val playlistName = db.localPlaylistDao().getPlaylistById(playlistId)?.name
                 if (rowId > 0L) {
                     db.localPlaylistDao().removeTrackById(rowId)
                 } else {
                     db.localPlaylistDao().removeTrackFromPlaylist(playlistId, trackId)
+                }
+
+                if (sessionManager.isLoggedIn()) {
+                    syncPlaylistTrackRemovalToBackend(playlistId, playlistName, trackId)
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -1619,20 +2103,7 @@ class MainPlayerViewModel(
     }
 
     fun createPlaylist(name: String) {
-        if (name.isBlank()) return
         createLocalPlaylist(name)
-        if (sessionManager.isLoggedIn()) {
-            viewModelScope.launch {
-                try {
-                    val resp = apiService.createPlaylist(CreatePlaylistRequestDto(name = name.trim()))
-                    if (resp.isSuccessful) {
-                        loadPlaylists()
-                    }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-            }
-        }
     }
 
     fun deletePlaylist(playlistId: Int) {
@@ -1649,19 +2120,19 @@ class MainPlayerViewModel(
         }
     }
 
-    fun addTrackToPlaylist(playlistId: Int, track: AudioTrack, source: String = "jamendo") {
+    fun addTrackToPlaylist(playlistId: Int, track: AudioTrack, source: String? = null) {
         viewModelScope.launch {
             try {
-                val externalId = track.id.substringAfter('_', track.id)
+                val ref = TrackSourceResolver.resolveTrackRef(track, explicitSource = source) ?: return@launch
                 val resp = apiService.addTrackToPlaylist(
                     playlistId = playlistId,
                     request = AddTrackToPlaylistRequestDto(
-                        source = source,
-                        externalId = externalId,
-                        title = track.title,
-                        artist = track.artist,
-                        artworkUrl = track.artworkUrl,
-                        durationMs = track.durationMs
+                        source = ref.source,
+                        externalId = ref.externalId,
+                        title = ref.title,
+                        artist = ref.artist,
+                        artworkUrl = ref.artworkUrl,
+                        durationMs = ref.durationMs
                     )
                 )
                 if (resp.isSuccessful) {
@@ -1691,26 +2162,68 @@ class MainPlayerViewModel(
             try {
                 val resp = apiService.getFavoriteTracks()
                 if (resp.isSuccessful) {
-                    _favoriteTracks.value = resp.body().orEmpty()
+                    val remoteFavorites = resp.body().orEmpty()
+                    _favoriteTracks.value = remoteFavorites
+                    if (sessionManager.isLoggedIn() && remoteFavorites.isNotEmpty()) {
+                        syncCloudFavoritesToLocal(remoteFavorites)
+                    }
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 e.printStackTrace()
             }
         }
     }
 
-    fun addTrackToFavorites(track: AudioTrack, source: String = "jamendo") {
+    private suspend fun syncCloudFavoritesToLocal(remoteFavorites: List<FavoriteTrackDto>) {
+        val baseUrl = sessionManager.getBaseUrl()
+        withContext(Dispatchers.IO) {
+            favoriteSyncMutex.withLock {
+                if (!sessionManager.isLoggedIn()) return@withLock
+                val existingIds = db.favoriteTrackDao().getAllFavorites().first()
+                    .map { it.id }
+                    .toMutableList()
+                for (remoteFav in remoteFavorites) {
+                    val track = TrackSourceResolver.buildAudioTrackFromCloud(
+                        source = remoteFav.source,
+                        externalId = remoteFav.externalId,
+                        rawTrackId = remoteFav.trackId,
+                        title = remoteFav.title,
+                        artist = remoteFav.artist,
+                        artworkUrl = remoteFav.artworkUrl,
+                        rawAudioUrl = remoteFav.audioUrl,
+                        durationMs = remoteFav.durationMs,
+                        baseUrl = baseUrl
+                    ) ?: continue
+                    if (existingIds.any { areTrackIdsEqual(it, track.id) }) continue
+                    existingIds.add(track.id)
+                    db.favoriteTrackDao().insertFavorite(
+                        FavoriteTrackEntity(
+                            id = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            audioUrl = track.audioUrl,
+                            artworkUrl = track.artworkUrl,
+                            durationMs = track.durationMs
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    fun addTrackToFavorites(track: AudioTrack, source: String? = null) {
         viewModelScope.launch {
             try {
-                val externalId = track.id.substringAfter('_', track.id)
+                val ref = TrackSourceResolver.resolveTrackRef(track, explicitSource = source) ?: return@launch
                 val resp = apiService.addFavoriteTrack(
                     AddFavoriteTrackRequestDto(
-                        source = source,
-                        externalId = externalId,
-                        title = track.title,
-                        artist = track.artist,
-                        artworkUrl = track.artworkUrl,
-                        durationMs = track.durationMs
+                        source = ref.source,
+                        externalId = ref.externalId,
+                        title = ref.title,
+                        artist = ref.artist,
+                        artworkUrl = ref.artworkUrl,
+                        durationMs = ref.durationMs
                     )
                 )
                 if (resp.isSuccessful) {
@@ -1719,6 +2232,139 @@ class MainPlayerViewModel(
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+    }
+
+    private suspend fun ensureRemotePlaylistId(localPlaylistId: Long?, playlistName: String): Int? =
+        playlistSyncMutex.withLock {
+            val cleanName = playlistName.trim()
+            if (cleanName.isEmpty()) return@withLock null
+            if (localPlaylistId != null) {
+                localToRemotePlaylistIds[localPlaylistId]?.let { cachedId ->
+                    return@withLock cachedId
+                }
+            }
+
+            var remotePlaylists = _playlists.value
+            var matched = remotePlaylists.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
+            if (matched == null) {
+                val fetchResp = runCatching { apiService.getPlaylists() }.getOrNull()
+                if (fetchResp?.isSuccessful == true) {
+                    remotePlaylists = fetchResp.body().orEmpty()
+                    _playlists.value = remotePlaylists
+                    matched = remotePlaylists.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
+                }
+            }
+            if (matched != null) {
+                if (localPlaylistId != null) localToRemotePlaylistIds[localPlaylistId] = matched.id
+                return@withLock matched.id
+            }
+
+            val createResp = runCatching {
+                apiService.createPlaylist(CreatePlaylistRequestDto(name = cleanName.take(200)))
+            }.getOrNull()
+            if (createResp?.isSuccessful == true) {
+                val created = createResp.body()
+                if (created != null) {
+                    if (localPlaylistId != null) localToRemotePlaylistIds[localPlaylistId] = created.id
+                    runCatching { apiService.getPlaylists() }.getOrNull()?.let { refreshResp ->
+                        if (refreshResp.isSuccessful) {
+                            _playlists.value = refreshResp.body().orEmpty()
+                        }
+                    }
+                    return@withLock created.id
+                }
+            }
+            null
+        }
+
+    private suspend fun syncTracksToRemotePlaylist(remotePlaylistId: Int, tracks: List<AudioTrack>) {
+        var syncedAny = false
+        for (track in tracks) {
+            val ref = TrackSourceResolver.resolveTrackRef(track) ?: continue
+            try {
+                val resp = apiService.addTrackToPlaylist(
+                    playlistId = remotePlaylistId,
+                    request = AddTrackToPlaylistRequestDto(
+                        source = ref.source,
+                        externalId = ref.externalId,
+                        title = ref.title,
+                        artist = ref.artist,
+                        artworkUrl = ref.artworkUrl,
+                        durationMs = ref.durationMs
+                    )
+                )
+                if (resp.isSuccessful || resp.code() == 409) {
+                    syncedAny = true
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("MainPlayerViewModel", "Playlist track sync skipped: ${e.message}")
+            }
+        }
+        if (syncedAny) {
+            runCatching { apiService.getPlaylists() }.getOrNull()?.let { refreshResp ->
+                if (refreshResp.isSuccessful) {
+                    _playlists.value = refreshResp.body().orEmpty()
+                }
+            }
+        }
+    }
+
+    private suspend fun syncPlaylistTrackRemovalToBackend(
+        localPlaylistId: Long,
+        playlistName: String?,
+        trackId: String
+    ) {
+        val (source, externalId) = TrackSourceResolver.resolveFromId(trackId) ?: return
+        val cleanName = playlistName?.trim()
+        var remoteId = localToRemotePlaylistIds[localPlaylistId]
+        if (remoteId == null && !cleanName.isNullOrBlank()) {
+            remoteId = _playlists.value.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }?.id
+                ?: runCatching { apiService.getPlaylists() }.getOrNull()
+                    ?.takeIf { it.isSuccessful }
+                    ?.body()
+                    ?.also { _playlists.value = it }
+                    ?.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
+                    ?.id
+        }
+        val targetPlaylistId = remoteId ?: return
+        try {
+            val detailResp = apiService.getPlaylist(targetPlaylistId)
+            val remoteTrack = detailResp.body()?.tracks?.firstOrNull {
+                it.source.equals(source, ignoreCase = true) && it.externalId == externalId
+            } ?: return
+            val delResp = apiService.removeTrackFromPlaylist(targetPlaylistId, remoteTrack.id)
+            if (delResp.isSuccessful) {
+                runCatching { apiService.getPlaylists() }.getOrNull()?.let { refreshResp ->
+                    if (refreshResp.isSuccessful) _playlists.value = refreshResp.body().orEmpty()
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainPlayerViewModel", "Playlist track removal sync skipped: ${e.message}")
+        }
+    }
+
+    private suspend fun syncPlaylistDeletionToBackend(localPlaylistId: Long, playlistName: String?) {
+        val cleanName = playlistName?.trim()
+        var remoteId = localToRemotePlaylistIds.remove(localPlaylistId)
+        if (remoteId == null && !cleanName.isNullOrBlank()) {
+            remoteId = _playlists.value.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }?.id
+                ?: runCatching { apiService.getPlaylists() }.getOrNull()
+                    ?.takeIf { it.isSuccessful }
+                    ?.body()
+                    ?.firstOrNull { it.name.equals(cleanName, ignoreCase = true) }
+                    ?.id
+        }
+        val targetId = remoteId ?: return
+        try {
+            val delResp = apiService.deletePlaylist(targetId)
+            if (delResp.isSuccessful) {
+                runCatching { apiService.getPlaylists() }.getOrNull()?.let { refreshResp ->
+                    if (refreshResp.isSuccessful) _playlists.value = refreshResp.body().orEmpty()
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainPlayerViewModel", "Playlist delete sync skipped: ${e.message}")
         }
     }
 
@@ -1759,9 +2405,7 @@ class MainPlayerViewModel(
                     track = track,
                     backendBaseUrl = com.musicplayer.android.core.network.ServerConfig.DEFAULT_BASE_URL,
                     onProgress = { progress ->
-                        val current = _downloadProgress.value.toMutableMap()
-                        current[track.id] = progress
-                        _downloadProgress.value = current
+                        _downloadProgress.update { it + (track.id to progress) }
                     }
                 )
 
@@ -1789,9 +2433,7 @@ class MainPlayerViewModel(
                 _authStatusMessage.value = "Помилка завантаження: ${e.message}"
             } finally {
                 activeDownloadJobs.remove(track.id)
-                val current = _downloadProgress.value.toMutableMap()
-                current.remove(track.id)
-                _downloadProgress.value = current
+                _downloadProgress.update { it - track.id }
             }
         }
         activeDownloadJobs[track.id] = job
@@ -1803,9 +2445,7 @@ class MainPlayerViewModel(
     fun cancelDownload(trackId: String) {
         activeDownloadJobs[trackId]?.cancel()
         activeDownloadJobs.remove(trackId)
-        val current = _downloadProgress.value.toMutableMap()
-        current.remove(trackId)
-        _downloadProgress.value = current
+        _downloadProgress.update { it - trackId }
     }
 
     fun removeCachedTrack(trackId: String) {
@@ -1834,14 +2474,15 @@ class MainPlayerViewModel(
                 val resp = apiService.login(LoginRequestDto(email = email.trim(), password = pass))
                 if (resp.isSuccessful && resp.body() != null) {
                     val authData = resp.body()!!
-                    val token = authData.token
+                    val token = authData.resolvedAccessToken()
                     if (!token.isNullOrBlank()) {
                         NetworkClient.authInterceptor.authToken = token
                         sessionManager.saveSession(
                             token = token,
                             userId = authData.userId,
                             username = authData.username,
-                            email = authData.email ?: email
+                            email = authData.email ?: email,
+                            refreshToken = authData.refreshToken
                         )
                         _currentUser.value = authData.username ?: authData.email ?: email
                         _authStatusMessage.value = "Авторизовано: ${_currentUser.value}"
@@ -1864,8 +2505,24 @@ class MainPlayerViewModel(
                 _authStatusMessage.value = "Реєстрація..."
                 val resp = apiService.register(RegisterRequestDto(username = username.trim(), email = email.trim(), password = pass))
                 if (resp.isSuccessful) {
-                    _authStatusMessage.value = "Реєстрація успішна! Входимо..."
-                    login(email, pass)
+                    val user = resp.body()
+                    val accessToken = user?.resolvedAccessToken()
+                    if (!accessToken.isNullOrBlank()) {
+                        NetworkClient.authInterceptor.authToken = accessToken
+                        sessionManager.saveSession(
+                            token = accessToken,
+                            userId = user.id,
+                            username = user.username,
+                            email = user.email,
+                            refreshToken = user.refreshToken
+                        )
+                        _currentUser.value = user.username
+                        _authStatusMessage.value = "Реєстрація успішна! Авторизовано: ${user.username}"
+                        loadBackendData()
+                    } else {
+                        _authStatusMessage.value = "Реєстрація успішна! Входимо..."
+                        login(email, pass)
+                    }
                 } else {
                     _authStatusMessage.value = "Помилка реєстрації: HTTP ${resp.code()}"
                 }
@@ -1876,10 +2533,81 @@ class MainPlayerViewModel(
     }
 
     fun logout() {
+        val currentRefresh = sessionManager.getRefreshToken()
         sessionManager.clearSession()
         NetworkClient.authInterceptor.authToken = null
         _currentUser.value = null
+        _userStatsSummary.value = null
+        _playlists.value = emptyList()
+        _favoriteTracks.value = emptyList()
+        localToRemotePlaylistIds.clear()
         _authStatusMessage.value = "Ви вийшли з акаунту"
+
+        if (!currentRefresh.isNullOrBlank()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching {
+                    apiService.revokeToken(RefreshTokenRequestDto(refreshToken = currentRefresh))
+                }
+            }
+        }
+    }
+
+    fun loadStats(period: String = _statsPeriod.value) {
+        val normalizedPeriod = when (period.lowercase()) {
+            "day", "week", "month", "all" -> period.lowercase()
+            else -> "week"
+        }
+        _statsPeriod.value = normalizedPeriod
+        viewModelScope.launch {
+            _statsLoading.value = true
+            _statsError.value = null
+            try {
+                val (systemResp, overviewResp, userResp) = supervisorScope {
+                    val systemDeferred = async(Dispatchers.IO) {
+                        runCatching { apiService.getSystemReport(normalizedPeriod) }.getOrNull()
+                    }
+                    val overviewDeferred = async(Dispatchers.IO) {
+                        runCatching { apiService.getPublicOverview() }.getOrNull()
+                    }
+                    val userDeferred = if (sessionManager.isLoggedIn()) {
+                        async(Dispatchers.IO) {
+                            runCatching { apiService.getUserStatsSummary(normalizedPeriod) }.getOrNull()
+                        }
+                    } else {
+                        _userStatsSummary.value = null
+                        null
+                    }
+                    Triple(
+                        systemDeferred.await(),
+                        overviewDeferred.await(),
+                        userDeferred?.await()
+                    )
+                }
+
+                var anySuccess = false
+                if (systemResp?.isSuccessful == true && systemResp.body() != null) {
+                    _systemReport.value = systemResp.body()
+                    anySuccess = true
+                }
+                if (overviewResp?.isSuccessful == true && overviewResp.body() != null) {
+                    _publicOverview.value = overviewResp.body()
+                    anySuccess = true
+                }
+                if (userResp?.isSuccessful == true && userResp.body() != null) {
+                    _userStatsSummary.value = userResp.body()
+                    anySuccess = true
+                }
+                if (!anySuccess) {
+                    val codeLabel = systemResp?.code()?.let { " (HTTP $it)" }.orEmpty()
+                    _statsError.value = "Сервер статистики недоступний$codeLabel"
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                _statsError.value = "Не вдалося завантажити статистику: ${e.message}"
+            } finally {
+                _statsLoading.value = false
+            }
+        }
     }
 
     /**
@@ -1943,6 +2671,210 @@ class MainPlayerViewModel(
     fun playArtistTracks(artist: com.musicplayer.android.core.audio.ArtistInfo, startIndex: Int = 0) {
         if (artist.tracks.isNotEmpty()) {
             playQueue(artist.tracks, startIndex)
+        }
+    }
+
+    fun setPlaylistSearchSourceFilter(filter: com.musicplayer.android.core.audio.ExternalPlaylistSource) {
+        if (_playlistSearchSourceFilter.value == filter) return
+        _playlistSearchSourceFilter.value = filter
+        if (lastPlaylistSearchQuery.isNotBlank()) {
+            searchExternalPlaylists(lastPlaylistSearchQuery, filter)
+        }
+    }
+
+    fun searchExternalPlaylists(
+        query: String,
+        sourceFilter: com.musicplayer.android.core.audio.ExternalPlaylistSource = _playlistSearchSourceFilter.value
+    ) {
+        val clean = query.trim()
+        lastPlaylistSearchQuery = clean
+        externalPlaylistSearchJob?.cancel()
+        _externalPlaylistSearchError.value = null
+        if (clean.isBlank()) {
+            _searchedExternalPlaylists.value = emptyList()
+            _isSearchingExternalPlaylists.value = false
+            return
+        }
+
+        externalPlaylistSearchJob = viewModelScope.launch {
+            _isSearchingExternalPlaylists.value = true
+            try {
+                val results = com.musicplayer.android.core.audio.ExternalPlaylistService.searchPlaylists(
+                    query = clean,
+                    sourceFilter = sourceFilter,
+                    limitPerSource = 12
+                )
+                _searchedExternalPlaylists.value = results
+                if (results.isEmpty()) {
+                    _externalPlaylistSearchError.value = "Плейлисти за запитом «$clean» не знайдено"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _searchedExternalPlaylists.value = emptyList()
+                _externalPlaylistSearchError.value = "Не вдалося знайти плейлисти: ${e.message ?: "помилка мережі"}"
+            } finally {
+                _isSearchingExternalPlaylists.value = false
+            }
+        }
+    }
+
+    fun openExternalPlaylist(summary: com.musicplayer.android.core.audio.ExternalPlaylistSummary) {
+        openExternalPlaylist(
+            urlOrId = summary.url,
+            sourceHint = summary.source,
+            titleHint = summary.title,
+            authorHint = summary.author,
+            artworkHint = summary.artworkUrl
+        )
+    }
+
+    fun openExternalPlaylist(
+        urlOrId: String,
+        sourceHint: String? = null,
+        titleHint: String? = null,
+        authorHint: String? = null,
+        artworkHint: String? = null
+    ) {
+        val clean = urlOrId.trim()
+        if (clean.isBlank()) return
+        openPlaylistJob?.cancel()
+        _openedPlaylistError.value = null
+        _isLoadingOpenedPlaylist.value = true
+        _openedPlaylistDetails.value = com.musicplayer.android.core.audio.ExternalPlaylistDetails(
+            summary = com.musicplayer.android.core.audio.ExternalPlaylistSummary(
+                id = clean,
+                source = sourceHint
+                    ?: com.musicplayer.android.core.audio.ExternalPlaylistService.parsePlaylistUrlOrId(clean)?.source
+                    ?: com.musicplayer.android.core.audio.ExternalPlaylistSource.YOUTUBE.id,
+                title = titleHint?.takeIf { it.isNotBlank() } ?: "Завантаження плейлиста...",
+                author = authorHint?.takeIf { it.isNotBlank() } ?: "",
+                url = clean,
+                artworkUrl = artworkHint
+            ),
+            tracks = emptyList()
+        )
+
+        openPlaylistJob = viewModelScope.launch {
+            try {
+                val details = com.musicplayer.android.core.audio.ExternalPlaylistService.fetchPlaylistDetails(
+                    playlistUrlOrId = clean,
+                    sourceHint = sourceHint,
+                    titleHint = titleHint,
+                    authorHint = authorHint,
+                    artworkHint = artworkHint
+                )
+                if (details != null && details.tracks.isNotEmpty()) {
+                    _openedPlaylistDetails.value = details
+                    _openedPlaylistError.value = null
+                } else {
+                    _openedPlaylistError.value = "Плейлист порожній або не підтримується"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _openedPlaylistError.value = "Помилка завантаження плейлиста: ${e.message ?: "перевірте посилання"}"
+            } finally {
+                _isLoadingOpenedPlaylist.value = false
+            }
+        }
+    }
+
+    fun openCuratedPlaylistDetails(playlist: com.musicplayer.android.core.audio.CuratedPlaylist) {
+        openPlaylistJob?.cancel()
+        _openedPlaylistError.value = null
+        val summary = com.musicplayer.android.core.audio.ExternalPlaylistSummary(
+            id = playlist.id,
+            source = com.musicplayer.android.core.audio.ExternalPlaylistSource.CURATED.id,
+            title = playlist.title,
+            author = playlist.description,
+            url = playlist.searchQuery,
+            trackCount = playlist.tracks.size
+        )
+        if (playlist.tracks.isNotEmpty()) {
+            _openedPlaylistDetails.value = com.musicplayer.android.core.audio.ExternalPlaylistDetails(summary, playlist.tracks)
+            _isLoadingOpenedPlaylist.value = false
+            return
+        }
+
+        _openedPlaylistDetails.value = com.musicplayer.android.core.audio.ExternalPlaylistDetails(summary, emptyList())
+        _isLoadingOpenedPlaylist.value = true
+        openPlaylistJob = viewModelScope.launch {
+            try {
+                val dtoList = withContext(Dispatchers.IO) {
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.search(playlist.searchQuery, limit = 25)
+                }
+                val tracks = dtoList.map { it.toAudioTrack() }
+                if (tracks.isNotEmpty()) {
+                    _curatedPlaylists.value = _curatedPlaylists.value.map {
+                        if (it.id == playlist.id) it.copy(tracks = tracks) else it
+                    }
+                    _openedPlaylistDetails.value = com.musicplayer.android.core.audio.ExternalPlaylistDetails(
+                        summary = summary.copy(trackCount = tracks.size, artworkUrl = tracks.firstOrNull()?.artworkUrl),
+                        tracks = tracks
+                    )
+                } else {
+                    _openedPlaylistError.value = "Не вдалося завантажити треки добірки"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _openedPlaylistError.value = "Помилка завантаження добірки: ${e.message}"
+            } finally {
+                _isLoadingOpenedPlaylist.value = false
+            }
+        }
+    }
+
+    fun openGenrePlaylistDetails(genre: com.musicplayer.android.core.audio.MusicGenre) {
+        openPlaylistJob?.cancel()
+        _openedPlaylistError.value = null
+        val summary = com.musicplayer.android.core.audio.ExternalPlaylistSummary(
+            id = "genre_${genre.id}",
+            source = com.musicplayer.android.core.audio.ExternalPlaylistSource.CURATED.id,
+            title = genre.name,
+            author = "Жанрова добірка",
+            url = genre.searchQuery
+        )
+        _openedPlaylistDetails.value = com.musicplayer.android.core.audio.ExternalPlaylistDetails(summary, emptyList())
+        _isLoadingOpenedPlaylist.value = true
+        openPlaylistJob = viewModelScope.launch {
+            try {
+                val dtoList = withContext(Dispatchers.IO) {
+                    com.musicplayer.android.core.audio.YouTubeExtractorService.search(genre.searchQuery, limit = 25)
+                }
+                val tracks = dtoList.map { it.toAudioTrack() }
+                if (tracks.isNotEmpty()) {
+                    _openedPlaylistDetails.value = com.musicplayer.android.core.audio.ExternalPlaylistDetails(
+                        summary = summary.copy(trackCount = tracks.size, artworkUrl = tracks.firstOrNull()?.artworkUrl),
+                        tracks = tracks
+                    )
+                } else {
+                    _openedPlaylistError.value = "Треки для жанру не знайдено"
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _openedPlaylistError.value = "Помилка завантаження жанру: ${e.message}"
+            } finally {
+                _isLoadingOpenedPlaylist.value = false
+            }
+        }
+    }
+
+    fun clearOpenedExternalPlaylist() {
+        openPlaylistJob?.cancel()
+        _isLoadingOpenedPlaylist.value = false
+        _openedPlaylistError.value = null
+        _openedPlaylistDetails.value = null
+    }
+
+    fun saveOpenedPlaylistToLibrary(customName: String? = null, onSaved: ((Long, String) -> Unit)? = null) {
+        val details = _openedPlaylistDetails.value ?: return
+        if (details.tracks.isEmpty()) return
+        val finalName = customName?.trim()?.takeIf { it.isNotBlank() } ?: details.summary.title
+        createLocalPlaylistWithTracks(finalName, details.tracks) { id ->
+            onSaved?.invoke(id, finalName)
         }
     }
 

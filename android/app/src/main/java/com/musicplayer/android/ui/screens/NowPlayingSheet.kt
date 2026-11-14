@@ -667,9 +667,9 @@ fun NowPlayingSheet(
                 }
 
                 // Download to Device Button
-                val cachedTracks by viewModel.cachedTracks.collectAsState()
-                val isDownloaded = remember(activeTrack.id, cachedTracks) {
-                    cachedTracks.any { it.id == activeTrack.id }
+                val downloadedTrackIds by viewModel.downloadedTrackIds.collectAsState()
+                val isDownloaded = remember(activeTrack.id, downloadedTrackIds) {
+                    activeTrack.id in downloadedTrackIds
                 }
                 val downloadProgress by viewModel.downloadProgress.collectAsState()
                 val activeProgress = downloadProgress[activeTrack.id]

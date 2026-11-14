@@ -14,6 +14,7 @@ import coil.fetch.DrawableResult
 import coil.fetch.FetchResult
 import coil.fetch.Fetcher
 import coil.request.Options
+import coil.size.Dimension
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
@@ -47,13 +48,16 @@ class AudioArtworkFetcher(
         }
 
         var bitmap: Bitmap? = null
+        val reqWidth = (options.size.width as? Dimension.Pixels)?.px ?: 512
+        val reqHeight = (options.size.height as? Dimension.Pixels)?.px ?: 512
+        val reqSize = maxOf(reqWidth, reqHeight).coerceIn(256, 1024)
 
         // 2. Hardware-accelerated thumbnail on Android 10+ (API 29+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && data.scheme == "content") {
             try {
                 // If it's a MediaStore media uri, loadThumbnail extracts/retrieves cached thumbnail
                 if (!uriKey.contains("albumart")) {
-                    bitmap = context.contentResolver.loadThumbnail(data, Size(128, 128), null)
+                    bitmap = context.contentResolver.loadThumbnail(data, Size(reqSize, reqSize), null)
                 }
             } catch (_: Exception) {
                 bitmap = null
@@ -63,12 +67,9 @@ class AudioArtworkFetcher(
         // 2b. Legacy albumart content uri attempt
         if (bitmap == null && uriKey.contains("albumart")) {
             try {
-                context.contentResolver.openInputStream(data)?.use { stream ->
-                    val opts = BitmapFactory.Options().apply {
-                        inSampleSize = 2
-                        inPreferredConfig = Bitmap.Config.RGB_565
-                    }
-                    bitmap = BitmapFactory.decodeStream(stream, null, opts)
+                val rawBytes = context.contentResolver.openInputStream(data)?.use { it.readBytes() }
+                if (rawBytes != null) {
+                    bitmap = decodeSampledBitmap(rawBytes, reqSize)
                 }
             } catch (_: Exception) {
                 bitmap = null
@@ -86,26 +87,7 @@ class AudioArtworkFetcher(
                 }
                 val rawPicture = retriever.embeddedPicture
                 if (rawPicture != null) {
-                    val boundsOptions = BitmapFactory.Options().apply {
-                        inJustDecodeBounds = true
-                    }
-                    BitmapFactory.decodeByteArray(rawPicture, 0, rawPicture.size, boundsOptions)
-
-                    var inSample = 1
-                    val reqSize = 128
-                    if (boundsOptions.outHeight > reqSize || boundsOptions.outWidth > reqSize) {
-                        val halfH = boundsOptions.outHeight / 2
-                        val halfW = boundsOptions.outWidth / 2
-                        while ((halfH / inSample) >= reqSize && (halfW / inSample) >= reqSize) {
-                            inSample *= 2
-                        }
-                    }
-
-                    val decodeOptions = BitmapFactory.Options().apply {
-                        inSampleSize = inSample
-                        inPreferredConfig = Bitmap.Config.RGB_565
-                    }
-                    bitmap = BitmapFactory.decodeByteArray(rawPicture, 0, rawPicture.size, decodeOptions)
+                    bitmap = decodeSampledBitmap(rawPicture, reqSize)
                 }
             } catch (_: Exception) {
                 bitmap = null
@@ -133,6 +115,28 @@ class AudioArtworkFetcher(
                 dataSource = DataSource.MEMORY
             )
         }
+    }
+
+    private fun decodeSampledBitmap(rawBytes: ByteArray, reqSize: Int): Bitmap? {
+        val boundsOptions = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, boundsOptions)
+
+        var inSample = 1
+        if (boundsOptions.outHeight > reqSize || boundsOptions.outWidth > reqSize) {
+            val halfH = boundsOptions.outHeight / 2
+            val halfW = boundsOptions.outWidth / 2
+            while ((halfH / inSample) >= reqSize && (halfW / inSample) >= reqSize) {
+                inSample *= 2
+            }
+        }
+
+        val decodeOptions = BitmapFactory.Options().apply {
+            inSampleSize = inSample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        return BitmapFactory.decodeByteArray(rawBytes, 0, rawBytes.size, decodeOptions)
     }
 
     class Factory(private val context: Context) : Fetcher.Factory<Uri> {

@@ -3,6 +3,7 @@ package com.musicplayer.android.core.database
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import java.io.File
 
 /**
  * Fix #14: Added artworkUrl so cached tracks preserve their album artwork
@@ -21,4 +22,16 @@ data class CachedTrackEntity(
     val artworkUrl: String? = null,
     val durationMs: Long,
     val cachedAtTimestamp: Long
-)
+) {
+    /**
+     * Returns true strictly when a real downloaded audio file exists on disk (>= 50 KB),
+     * preventing metadata-only search/recommendation entries (localFilePath == null)
+     * from appearing as downloaded tracks.
+     */
+    fun hasValidDownloadedFile(): Boolean {
+        val path = localFilePath ?: return false
+        if (path.isBlank()) return false
+        val file = File(path)
+        return file.exists() && file.length() >= 51_200L
+    }
+}

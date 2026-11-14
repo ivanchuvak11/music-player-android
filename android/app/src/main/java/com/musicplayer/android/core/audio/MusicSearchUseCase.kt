@@ -71,7 +71,24 @@ class MusicSearchUseCase(
             val soundCloudResult = soundCloudDeferred.await()
             val soundCloudTracks = soundCloudResult.getOrElse { emptyList() }
 
-            val merged = mergeAndDeduplicateSources(soundCloudTracks)
+            val supplementedSoundCloud = if (soundCloudTracks.size < minOf(3, limit)) {
+                val fallbackQuery = MultilingualSearchHelper.buildOnlineFallbackQueries(query).firstOrNull()
+                if (!fallbackQuery.isNullOrBlank()) {
+                    val fallbackResult = withTimeoutOrNull(2500L) { fetchSoundCloud(fallbackQuery, limit) }
+                    val extra = fallbackResult?.getOrNull().orEmpty()
+                    if (extra.isNotEmpty()) {
+                        mergeAndDeduplicateSources(soundCloudTracks + extra).take(limit)
+                    } else {
+                        soundCloudTracks
+                    }
+                } else {
+                    soundCloudTracks
+                }
+            } else {
+                soundCloudTracks
+            }
+
+            val merged = mergeAndDeduplicateSources(supplementedSoundCloud)
 
             // Collect per-source errors (for UI partial failure notification)
             val errors = mutableMapOf<String, MusicSourceError>()
@@ -143,7 +160,7 @@ class MusicSearchUseCase(
                     durationMs = track.durationMs,
                     cachedAtTimestamp = System.currentTimeMillis()
                 )
-                cachedTrackDao.insertTrack(entity)
+                cachedTrackDao.insertMetadataIfAbsent(entity)
             }
             Log.d(TAG, "Cached ${tracks.size} search result tracks")
         } catch (e: Exception) {

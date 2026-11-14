@@ -86,12 +86,12 @@ fun EqualizerDialog(
                                 imageVector = if (audioEffectsState.isHeadphonesConnected)
                                     Icons.Rounded.Headphones
                                 else
-                                    Icons.Rounded.HeadphonesBattery,
+                                    Icons.AutoMirrored.Rounded.VolumeUp,
                                 contentDescription = null,
                                 tint = if (audioEffectsState.isHeadphonesConnected)
                                     DarkRefTheme.AccentMint
                                 else
-                                    DarkRefTheme.AccentPink,
+                                    DarkRefTheme.TextSecondary,
                                 modifier = Modifier.size(13.dp)
                             )
                             Spacer(modifier = Modifier.width(4.dp))
@@ -104,7 +104,7 @@ fun EqualizerDialog(
                                 color = if (audioEffectsState.isHeadphonesConnected)
                                     DarkRefTheme.AccentMint
                                 else
-                                    DarkRefTheme.AccentPink
+                                    DarkRefTheme.TextSecondary
                             )
                         }
                     }
@@ -113,29 +113,16 @@ fun EqualizerDialog(
                 Switch(
                     checked = audioEffectsState.isEnabled,
                     onCheckedChange = { desired ->
-                        if (desired) {
-                            val success = viewModel.setEqualizerEnabled(true)
-                            if (!success) {
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.equalizer_headphones_toast),
-                                    Toast.LENGTH_SHORT
-                                ).show()
+                        viewModel.setEqualizerEnabled(desired)
+                        Toast.makeText(
+                            context,
+                            if (desired) {
+                                context.getString(R.string.equalizer_enabled_toast)
                             } else {
-                                Toast.makeText(
-                                    context,
-                                    context.getString(R.string.equalizer_enabled_toast),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        } else {
-                            viewModel.setEqualizerEnabled(false)
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.equalizer_disabled_toast),
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        }
+                                context.getString(R.string.equalizer_disabled_toast)
+                            },
+                            Toast.LENGTH_SHORT
+                        ).show()
                     },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = DarkRefTheme.BackgroundDark,
@@ -153,14 +140,14 @@ fun EqualizerDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(DarkRefTheme.AccentPink.copy(alpha = 0.14f))
-                        .border(1.dp, DarkRefTheme.AccentPink.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                        .background(DarkRefTheme.SurfaceCardElevated)
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
                         .padding(10.dp)
                 ) {
                     Text(
                         text = stringResource(R.string.headphones_warning),
                         fontSize = 11.sp,
-                        color = DarkRefTheme.TextPrimary
+                        color = DarkRefTheme.TextSecondary
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))

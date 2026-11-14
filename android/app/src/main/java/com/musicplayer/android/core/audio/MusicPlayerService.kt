@@ -8,7 +8,10 @@ import java.io.File
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
@@ -32,6 +35,26 @@ import kotlinx.coroutines.launch
  * Fix #16: onTaskRemoved only stops the service when there is nothing loaded.
  * Swiping the app from Recents while paused now keeps the service alive with its notification.
  */
+/**
+ * Checks whether a Media3 PlaybackException was caused by an expired CDN URL (HTTP 403/410).
+ */
+@OptIn(UnstableApi::class)
+internal fun isExpiredStreamPlaybackError(error: PlaybackException): Boolean {
+    var cause: Throwable? = error
+    var depth = 0
+    while (cause != null && depth < 12) {
+        if (cause is HttpDataSource.InvalidResponseCodeException &&
+            (cause.responseCode == 403 || cause.responseCode == 410)
+        ) {
+            return true
+        }
+        cause = cause.cause
+        depth++
+    }
+    return error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS &&
+        (error.message?.contains("403") == true || error.message?.contains("410") == true)
+}
+
 class MusicPlayerService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
@@ -43,7 +66,10 @@ class MusicPlayerService : MediaSessionService() {
         // C1 FIX: Pass cache DataSource DIRECTLY to constructor so caching actually works
         val baseCacheDataSourceFactory = AudioCacheManager.buildCacheDataSourceFactory(this)
 
-        // ResolvingDataSource: intercepts YouTube track URIs and resolves direct CDN audio streams on mobile client
+        var exoPlayerRef: ExoPlayer? = null
+
+        // ResolvingDataSource: intercepts track URIs, resolves direct CDN audio streams on client,
+        // and falls back gracefully to YouTube stream search if external/proxy sources fail (e.g. SoundCloud 502).
         val resolvingDataSourceFactory = androidx.media3.datasource.ResolvingDataSource.Factory(
             baseCacheDataSourceFactory,
             androidx.media3.datasource.ResolvingDataSource.Resolver { dataSpec ->
@@ -76,7 +102,7 @@ class MusicPlayerService : MediaSessionService() {
                     }
                 }
 
-                // 2. Якщо локального файлу немає — резолвимо YouTube-потік
+                // 2. Якщо це YouTube-потік — резолвимо через NewPipeExtractor
                 val videoId = YouTubeExtractorService.extractVideoIdFromUri(uri)
                 if (videoId != null) {
                     val resolvedUrl = YouTubeExtractorService.resolveAudioStreamUrlSync(videoId)
@@ -89,6 +115,50 @@ class MusicPlayerService : MediaSessionService() {
                             .build()
                     }
                 }
+
+                // 3. Fallback для зовнішніх/проксі-потоків (SoundCloud, backend stream proxy)
+                val uriStr = uri.toString()
+                // 2b. Direct SoundCloud track URI (soundcloud://url/...) resolved via NewPipe
+                if (ExternalPlaylistService.decodeSoundCloudStreamUri(uriStr) != null) {
+                    val resolvedScUrl = ExternalPlaylistService.resolveSoundCloudAudioStreamUrlSync(uriStr)
+                    if (!resolvedScUrl.isNullOrBlank()) {
+                        return@Resolver dataSpec.buildUpon()
+                            .setUri(Uri.parse(resolvedScUrl))
+                            .setKey(rawKey ?: "soundcloud_${uriStr.hashCode()}")
+                            .build()
+                    }
+                }
+                val isProxyStream = uriStr.startsWith("soundcloud://") || uriStr.contains("/api/soundcloud/") || uriStr.contains("/api/") || rawKey?.startsWith("soundcloud_") == true
+                if (isProxyStream) {
+                    val isPlayable = if (uriStr.startsWith("soundcloud://")) false else isStreamUriPlayable(uriStr)
+                    if (!isPlayable) {
+                        Log.w("MusicPlayerService", "Stream proxy unreachable: $uriStr. Attempting YouTube fallback...")
+                        val cleanKey = rawKey ?: ""
+                        val db = try { AppDatabase.getDatabase(this@MusicPlayerService) } catch (e: Exception) { null }
+                        val cachedEntity = if (cleanKey.isNotBlank()) db?.cachedTrackDao()?.getTrackByIdDirect(cleanKey) else null
+                        val title = cachedEntity?.title ?: exoPlayerRef?.currentMediaItem?.mediaMetadata?.title?.toString()
+                        val artist = cachedEntity?.artist ?: exoPlayerRef?.currentMediaItem?.mediaMetadata?.artist?.toString()
+
+                        if (!title.isNullOrBlank()) {
+                            val searchQuery = "${artist.orEmpty()} $title".trim()
+                            val searchResults = kotlinx.coroutines.runBlocking(Dispatchers.IO) {
+                                YouTubeExtractorService.search(searchQuery, limit = 1)
+                            }
+                            val best = searchResults.firstOrNull()
+                            if (best != null) {
+                                val ytStreamUrl = YouTubeExtractorService.resolveAudioStreamUrlSync(best.externalId)
+                                if (!ytStreamUrl.isNullOrBlank()) {
+                                    Log.i("MusicPlayerService", "Resolved fallback stream for '$searchQuery': $ytStreamUrl")
+                                    return@Resolver dataSpec.buildUpon()
+                                        .setUri(Uri.parse(ytStreamUrl))
+                                        .setKey("youtube_${best.externalId}")
+                                        .build()
+                                }
+                            }
+                        }
+                    }
+                }
+
                 dataSpec
             }
         )
@@ -121,8 +191,45 @@ class MusicPlayerService : MediaSessionService() {
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, /* handleAudioFocus= */ true)
             .setHandleAudioBecomingNoisy(true)
-            .setWakeMode(C.WAKE_MODE_LOCAL)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+        exoPlayerRef = player
+        var recoveredExpiredMediaId: String? = null
+        player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (mediaItem?.mediaId != recoveredExpiredMediaId) {
+                    recoveredExpiredMediaId = null
+                }
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                if (!isExpiredStreamPlaybackError(error)) return
+                val currentItem = player.currentMediaItem ?: return
+                val uriStr = currentItem.localConfiguration?.uri?.toString().orEmpty()
+                if (uriStr.startsWith("content://") || uriStr.startsWith("file://")) return
+
+                val mediaId = currentItem.mediaId.ifBlank { uriStr }
+                if (mediaId == recoveredExpiredMediaId) return
+
+                recoveredExpiredMediaId = mediaId
+                val resumePos = player.currentPosition.coerceAtLeast(0L)
+                val shouldPlay = player.playWhenReady
+                val index = player.currentMediaItemIndex.coerceAtLeast(0)
+
+                YouTubeExtractorService.invalidateCachedStreamUrl(mediaId)
+                YouTubeExtractorService.extractVideoIdFromUri(Uri.parse(uriStr))?.let {
+                    YouTubeExtractorService.invalidateCachedStreamUrl(it)
+                }
+                ExternalPlaylistService.invalidateSoundCloudStreamCache(uriStr)
+
+                Log.w("MusicPlayerService", "Expired stream (${error.errorCode}) for $mediaId; refreshing URL at ${resumePos}ms")
+                player.seekTo(index, resumePos)
+                player.prepare()
+                if (shouldPlay) {
+                    player.play()
+                }
+            }
+        })
 
         // Fix #21: Use serviceScope so init is cancelled when service is destroyed
         player.addListener(object : Player.Listener {
@@ -224,5 +331,27 @@ class MusicPlayerService : MediaSessionService() {
             stopSelf()
         }
         // Otherwise: keep alive. The user can resume from the notification.
+    }
+
+    private fun isStreamUriPlayable(url: String): Boolean {
+        if (!url.startsWith("http://") && !url.startsWith("https://")) return true
+        return try {
+            val client = okhttp3.OkHttpClient.Builder()
+                .connectTimeout(1200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .readTimeout(1200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .followRedirects(true)
+                .build()
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .get()
+                .header("Range", "bytes=0-1024")
+                .build()
+            val response = client.newCall(request).execute()
+            val code = response.code
+            response.close()
+            code in 200..399
+        } catch (e: Exception) {
+            false
+        }
     }
 }

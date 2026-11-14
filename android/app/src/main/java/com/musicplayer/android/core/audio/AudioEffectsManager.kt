@@ -207,13 +207,7 @@ object AudioEffectsManager {
     @Synchronized
     fun checkAndUpdateHeadphoneStatus(context: Context) {
         val connected = isHeadphonesConnected(context)
-        val currentlyEnabled = _effectsState.value.isEnabled
-        if (!connected && currentlyEnabled) {
-            // Auto-disable hardware effects immediately when headphones are disconnected
-            setEnabled(false, context)
-        } else {
-            _effectsState.value = _effectsState.value.copy(isHeadphonesConnected = connected)
-        }
+        _effectsState.value = _effectsState.value.copy(isHeadphonesConnected = connected)
     }
 
     @Synchronized
@@ -222,7 +216,7 @@ object AudioEffectsManager {
         release()
 
         try {
-            val canEnable = _effectsState.value.isEnabled && _effectsState.value.isHeadphonesConnected
+            val canEnable = _effectsState.value.isEnabled
             val eq = Equalizer(0, audioSessionId).apply {
                 enabled = canEnable
             }
@@ -284,7 +278,7 @@ object AudioEffectsManager {
         val appContext = context?.applicationContext
         val headphonesConnected = appContext?.let { isHeadphonesConnected(it) } ?: _effectsState.value.isHeadphonesConnected
 
-        val actualEnabled = enabled && headphonesConnected
+        val actualEnabled = enabled
 
         if (actualEnabled) {
             try {
@@ -418,7 +412,7 @@ object AudioEffectsManager {
     }
 
     @Synchronized
-    fun setLoudnessEnhancerGain(gainMb: Int) {
+    fun setLoudnessEnhancerGain(gainMb: Int, context: Context? = null) {
         val clampedGain = gainMb.coerceIn(0, 1000)
         try {
             loudnessEnhancer?.let {
@@ -429,6 +423,7 @@ object AudioEffectsManager {
             e.printStackTrace()
         }
         _effectsState.value = _effectsState.value.copy(loudnessEnhancerGainMb = clampedGain)
+        if (context != null) persistState(context)
     }
 
     @Synchronized
@@ -452,7 +447,7 @@ object AudioEffectsManager {
     fun resetToFlat(context: Context? = null) {
         setPreset(AudioEffectsState.PRESET_FLAT, context)
         setBassBoost(0.toShort(), context)
-        setLoudnessEnhancerGain(0)
+        setLoudnessEnhancerGain(0, context)
     }
 
     /**
@@ -466,9 +461,10 @@ object AudioEffectsManager {
             val sessionManager = SessionManager.getInstance(appContext)
             val savedEnabled = sessionManager.getEqualizerEnabled()
             val headphonesConnected = isHeadphonesConnected(appContext)
-            val actualEnabled = savedEnabled && headphonesConnected
+            val actualEnabled = savedEnabled
             val preset = sessionManager.getEqualizerPreset()
             val bass = sessionManager.getEqualizerBassBoost()
+            val loudnessGain = sessionManager.getEqualizerLoudnessGain()
             val levels = sessionManager.getEqualizerBandLevels(_effectsState.value.numberOfBands.toInt())
 
             _effectsState.value = _effectsState.value.copy(
@@ -476,6 +472,7 @@ object AudioEffectsManager {
                 isHeadphonesConnected = headphonesConnected,
                 currentPreset = preset,
                 bassBoostStrength = bass,
+                loudnessEnhancerGainMb = loudnessGain,
                 bandLevels = levels
             )
 
@@ -483,6 +480,7 @@ object AudioEffectsManager {
             if (currentSessionId != 0 && actualEnabled) {
                 setEnabled(true, appContext)
                 if (bass > 0) setBassBoost(bass, appContext)
+                if (loudnessGain > 0) setLoudnessEnhancerGain(loudnessGain, appContext)
             }
         } catch (e: Throwable) {
             e.printStackTrace()
@@ -500,7 +498,8 @@ object AudioEffectsManager {
                     enabled = state.isEnabled,
                     preset = state.currentPreset,
                     bassBoost = state.bassBoostStrength,
-                    bandLevels = state.bandLevels
+                    bandLevels = state.bandLevels,
+                    loudnessGain = state.loudnessEnhancerGainMb
                 )
             } catch (e: Throwable) {
                 e.printStackTrace()

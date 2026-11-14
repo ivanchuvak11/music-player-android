@@ -13,15 +13,12 @@ interface PlayerController {
     fun playNext()
     fun playPrevious()
     fun seekTo(positionMs: Long)
-    fun setQueue(tracks: List<AudioTrack>, startIndex: Int = 0, autoPlay: Boolean = true)
+    fun setQueue(tracks: List<AudioTrack>, startIndex: Int = 0, autoPlay: Boolean = true, startPositionMs: Long = 0L)
     fun playTrack(track: AudioTrack, startPositionMs: Long = 0L)
     fun setShuffleMode(enabled: Boolean)
     fun toggleShuffle()
     fun setRepeatMode(repeatMode: Int)
     fun cycleRepeatMode()
-
-    // M4 FIX: Playback speed control
-    fun setPlaybackSpeed(speed: Float)
 
     // M12 FIX: Granular queue management
     fun addToQueue(track: AudioTrack)

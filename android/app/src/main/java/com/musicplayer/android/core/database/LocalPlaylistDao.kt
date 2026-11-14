@@ -11,6 +11,9 @@ interface LocalPlaylistDao {
     @Query("SELECT * FROM local_playlists ORDER BY createdAt DESC")
     fun getAllPlaylists(): Flow<List<LocalPlaylistEntity>>
 
+    @Query("SELECT * FROM local_playlists WHERE id = :playlistId LIMIT 1")
+    suspend fun getPlaylistById(playlistId: Long): LocalPlaylistEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylist(playlist: LocalPlaylistEntity): Long
 

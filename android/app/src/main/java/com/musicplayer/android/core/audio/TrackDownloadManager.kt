@@ -1,14 +1,18 @@
 package com.musicplayer.android.core.audio
 
 import android.app.DownloadManager
+import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import com.musicplayer.android.core.network.NetworkClient
 import com.musicplayer.android.core.network.ServerConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import okhttp3.Request
@@ -50,14 +54,16 @@ object TrackDownloadManager {
      * Tries public Environment.DIRECTORY_MUSIC first, falls back to external app files dir.
      */
     fun getDeviceMusicDirectory(context: Context): File {
-        val publicDir = try {
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
-        } catch (e: Exception) {
-            null
-        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            val publicDir = try {
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)
+            } catch (e: Exception) {
+                null
+            }
 
-        if (publicDir != null && (publicDir.exists() || publicDir.mkdirs()) && publicDir.canWrite()) {
-            return publicDir
+            if (publicDir != null && (publicDir.exists() || publicDir.mkdirs()) && publicDir.canWrite()) {
+                return publicDir
+            }
         }
 
         val extFilesDir = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)
@@ -111,8 +117,19 @@ object TrackDownloadManager {
                 YouTubeExtractorService.resolveAudioStreamUrl(videoId)
             }
             track.id.startsWith("soundcloud_") -> {
-                val externalId = track.id.removePrefix("soundcloud_")
-                ServerConfig.resolveSoundCloudStreamUrl(externalId, track.audioUrl, backendBaseUrl)
+                if (track.audioUrl.startsWith("soundcloud://")) {
+                    ExternalPlaylistService.resolveSoundCloudAudioStreamUrlSync(track.audioUrl)
+                        ?: run {
+                            val fallbackQuery = "${track.artist} ${track.title}".trim()
+                            val best = if (fallbackQuery.isNotBlank()) {
+                                YouTubeExtractorService.search(fallbackQuery, limit = 1).firstOrNull()
+                            } else null
+                            best?.externalId?.let { YouTubeExtractorService.resolveAudioStreamUrl(it) }
+                        }
+                } else {
+                    val externalId = track.id.removePrefix("soundcloud_")
+                    ServerConfig.resolveSoundCloudStreamUrl(externalId, track.audioUrl, backendBaseUrl)
+                }
             }
             track.id.startsWith("jamendo_") -> {
                 val externalId = track.id.removePrefix("jamendo_")
@@ -163,7 +180,12 @@ object TrackDownloadManager {
             return@withContext targetFile
         }
 
-        val directStreamUrl = resolveDirectStreamUrl(track, backendBaseUrl)
+        var directStreamUrl = resolveDirectStreamUrl(track, backendBaseUrl)
+        if (directStreamUrl.isNullOrBlank()) {
+            Log.w(TAG, "Initial stream URL resolve returned null for ${track.id}, retrying...")
+            delay(800)
+            directStreamUrl = resolveDirectStreamUrl(track, backendBaseUrl)
+        }
         if (directStreamUrl.isNullOrBlank()) {
             Log.e(TAG, "Failed to resolve stream URL for track: ${track.id}")
             return@withContext null
@@ -244,37 +266,46 @@ object TrackDownloadManager {
                     .get()
                     .build()
 
-                val response = client.newCall(request).execute()
-                if (!response.isSuccessful) {
-                    Log.e(TAG, "Download failed for ${track.id}: HTTP ${response.code}")
-                    return@withContext null
-                }
-
-                val body = response.body ?: return@withContext null
-                val cl = body.contentLength().takeIf { it > 0 } ?: totalContentLength
-
-                input = body.byteStream()
-                val buffer = ByteArray(65536) // 64 KB buffer
-                var totalBytes = 0L
-                var bytesRead: Int
-
-                while (input.read(buffer).also { bytesRead = it } != -1) {
-                    if (!coroutineContext.isActive) {
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        Log.e(TAG, "Download failed for ${track.id}: HTTP ${response.code}")
+                        output?.close()
+                        output = null
                         tempFile.delete()
                         return@withContext null
                     }
-                    output.write(buffer, 0, bytesRead)
-                    totalBytes += bytesRead
 
-                    if (cl > 0 && onProgress != null) {
-                        val progress = ((totalBytes * 100) / cl).toInt().coerceIn(0, 100)
-                        onProgress(progress)
+                    val body = response.body ?: run {
+                        output?.close()
+                        output = null
+                        tempFile.delete()
+                        return@withContext null
+                    }
+                    val cl = body.contentLength().takeIf { it > 0 } ?: totalContentLength
+
+                    input = body.byteStream()
+                    val buffer = ByteArray(65536) // 64 KB buffer
+                    var totalBytes = 0L
+                    var bytesRead: Int
+
+                    while (input!!.read(buffer).also { bytesRead = it } != -1) {
+                        if (!coroutineContext.isActive) {
+                            tempFile.delete()
+                            return@withContext null
+                        }
+                        output?.write(buffer, 0, bytesRead)
+                        totalBytes += bytesRead
+
+                        if (cl > 0 && onProgress != null) {
+                            val progress = ((totalBytes * 100) / cl).toInt().coerceIn(0, 100)
+                            onProgress(progress)
+                        }
                     }
                 }
             }
 
-            output.flush()
-            output.close()
+            output?.flush()
+            output?.close()
             output = null
             input?.close()
             input = null
@@ -289,17 +320,21 @@ object TrackDownloadManager {
                 Log.i(TAG, "Successfully downloaded track to device: ${targetFile.absolutePath} (${targetFile.length()} bytes)")
                 onProgress?.invoke(100)
 
-                // Register with Android MediaStore
-                try {
-                    MediaScannerConnection.scanFile(
-                        context,
-                        arrayOf(targetFile.absolutePath),
-                        arrayOf("audio/mpeg", "audio/mp4", "audio/*")
-                    ) { path, uri ->
-                        Log.d(TAG, "Indexed by Android MediaScanner: $path -> $uri")
+                // Register with Android MediaStore (or export to public Music on Android 10+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    exportToPublicMediaStore(context, targetFile, track)
+                } else {
+                    try {
+                        MediaScannerConnection.scanFile(
+                            context,
+                            arrayOf(targetFile.absolutePath),
+                            arrayOf("audio/mpeg", "audio/mp4", "audio/*")
+                        ) { path, uri ->
+                            Log.d(TAG, "Indexed by Android MediaScanner: $path -> $uri")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "MediaScanner notification failed: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "MediaScanner notification failed: ${e.message}")
                 }
 
                 targetFile
@@ -315,6 +350,42 @@ object TrackDownloadManager {
         } finally {
             try { input?.close() } catch (ignored: Exception) {}
             try { output?.close() } catch (ignored: Exception) {}
+        }
+    }
+
+    /**
+     * Copies a downloaded audio file into public MediaStore Music/ on Android 10+
+     * so it is visible in the system Files app and third-party music players.
+     */
+    private fun exportToPublicMediaStore(context: Context, file: File, track: AudioTrack) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val resolver = context.contentResolver
+        val values = ContentValues().apply {
+            put(MediaStore.Audio.Media.DISPLAY_NAME, file.name)
+            put(MediaStore.Audio.Media.TITLE, track.title.ifBlank { file.nameWithoutExtension })
+            put(MediaStore.Audio.Media.ARTIST, track.artist.ifBlank { "Unknown" })
+            put(MediaStore.Audio.Media.MIME_TYPE, "audio/mpeg")
+            put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC)
+            put(MediaStore.Audio.Media.IS_MUSIC, 1)
+            put(MediaStore.Audio.Media.IS_PENDING, 1)
+        }
+        var insertedUri: Uri? = null
+        try {
+            insertedUri = resolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: return
+            resolver.openOutputStream(insertedUri)?.use { out ->
+                file.inputStream().use { input ->
+                    input.copyTo(out, bufferSize = 65536)
+                }
+            }
+            values.clear()
+            values.put(MediaStore.Audio.Media.IS_PENDING, 0)
+            resolver.update(insertedUri, values, null, null)
+            Log.i(TAG, "Exported track to public MediaStore Music/: $insertedUri")
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaStore export failed: ${e.message}")
+            insertedUri?.let {
+                try { resolver.delete(it, null, null) } catch (_: Exception) {}
+            }
         }
     }
 

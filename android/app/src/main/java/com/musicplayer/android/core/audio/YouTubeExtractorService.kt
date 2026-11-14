@@ -8,9 +8,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
+import org.schabi.newpipe.extractor.localization.ContentCountry
+import org.schabi.newpipe.extractor.localization.Localization
 import org.schabi.newpipe.extractor.search.SearchInfo
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -68,9 +71,16 @@ object YouTubeExtractorService {
     fun init() {
         if (!isInitialized) {
             try {
-                NewPipe.init(NewPipeDownloader())
+                val locale = Locale.getDefault()
+                val localization = try {
+                    Localization.fromLocale(locale)
+                } catch (_: Exception) {
+                    Localization("uk", "UA")
+                }
+                val countryCode = locale.country.takeIf { it.length == 2 }?.uppercase(Locale.ROOT) ?: "UA"
+                NewPipe.init(NewPipeDownloader(), localization, ContentCountry(countryCode))
                 isInitialized = true
-                Log.i(TAG, "NewPipeExtractor successfully initialized")
+                Log.i(TAG, "NewPipeExtractor initialized (loc=${localization.localizationCode}, country=$countryCode)")
             } catch (e: Exception) {
                 Log.e(TAG, "Error initializing NewPipeExtractor: ${e.message}", e)
             }
@@ -123,6 +133,16 @@ object YouTubeExtractorService {
         val cached = streamCache[cleanId] ?: return null
         val now = System.currentTimeMillis()
         return if (now < cached.expiresAt - 300_000L) cached.url else null
+    }
+
+    /**
+     * Evicts a cached CDN URL so the next resolution fetches a fresh link after HTTP 403/410.
+     */
+    fun invalidateCachedStreamUrl(videoIdOrTrackId: String) {
+        val cleanId = videoIdOrTrackId.trim().removePrefix("youtube_")
+        if (cleanId.isNotBlank()) {
+            streamCache.remove(cleanId)
+        }
     }
 
     /**
@@ -239,10 +259,15 @@ object YouTubeExtractorService {
                 }
             }
 
+            var didYouMeanSuggestion: String? = null
+
             // 1. Primary: YouTube Music songs filter (pure studio tracks, clean artist and title)
             try {
                 val musicHandler = service.searchQHFactory.fromQuery(query.trim(), listOf("music_songs"), "")
                 val musicSearchInfo = SearchInfo.getInfo(service, musicHandler)
+                musicSearchInfo.searchSuggestion?.trim()?.takeIf { it.isNotBlank() }?.let {
+                    didYouMeanSuggestion = it
+                }
                 collectItems(musicSearchInfo.relatedItems)
             } catch (e: Exception) {
                 Log.w(TAG, "music_songs search failed for '$query', falling back: ${e.message}")
@@ -253,14 +278,49 @@ object YouTubeExtractorService {
                 try {
                     val videoHandler = service.searchQHFactory.fromQuery(query.trim(), listOf("videos"), "")
                     val videoSearchInfo = SearchInfo.getInfo(service, videoHandler)
+                    if (didYouMeanSuggestion.isNullOrBlank()) {
+                        videoSearchInfo.searchSuggestion?.trim()?.takeIf { it.isNotBlank() }?.let {
+                            didYouMeanSuggestion = it
+                        }
+                    }
                     collectItems(videoSearchInfo.relatedItems)
                 } catch (e: Exception) {
                     try {
                         val fallbackHandler = service.searchQHFactory.fromQuery(query.trim())
                         val fallbackInfo = SearchInfo.getInfo(service, fallbackHandler)
+                        if (didYouMeanSuggestion.isNullOrBlank()) {
+                            fallbackInfo.searchSuggestion?.trim()?.takeIf { it.isNotBlank() }?.let {
+                                didYouMeanSuggestion = it
+                            }
+                        }
                         collectItems(fallbackInfo.relatedItems)
                     } catch (e2: Exception) {
                         Log.e(TAG, "Video fallback search failed for '$query': ${e2.message}")
+                    }
+                }
+            }
+
+            // 3. Tertiary: Cross-language / typo / keyboard-layout recovery ONLY when results are sparse (< 3)
+            if (tracks.size < minOf(3, limit)) {
+                val altQuery = didYouMeanSuggestion
+                    ?.takeIf { !it.equals(query.trim(), ignoreCase = true) }
+                    ?: MultilingualSearchHelper.buildOnlineFallbackQueries(query).firstOrNull()
+
+                if (!altQuery.isNullOrBlank()) {
+                    Log.d(TAG, "Sparse results (${tracks.size}) for '$query', supplementing with '$altQuery'")
+                    try {
+                        val altMusicHandler = service.searchQHFactory.fromQuery(altQuery, listOf("music_songs"), "")
+                        val altMusicInfo = SearchInfo.getInfo(service, altMusicHandler)
+                        collectItems(altMusicInfo.relatedItems)
+                    } catch (_: Exception) {
+                    }
+                    if (tracks.size < limit) {
+                        try {
+                            val altVideoHandler = service.searchQHFactory.fromQuery(altQuery, listOf("videos"), "")
+                            val altVideoInfo = SearchInfo.getInfo(service, altVideoHandler)
+                            collectItems(altVideoInfo.relatedItems)
+                        } catch (_: Exception) {
+                        }
                     }
                 }
             }

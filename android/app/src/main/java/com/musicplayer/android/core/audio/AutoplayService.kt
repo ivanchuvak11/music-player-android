@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 object AutoplayService {
 
     private const val TAG = "AutoplayService"
+    private val contextualSimilarCache = java.util.concurrent.ConcurrentHashMap<String, List<AudioTrack>>()
 
     /**
      * Extracts clean artist and title by removing noisy video suffixes, features, and bracketed tags.
@@ -64,6 +65,12 @@ object AutoplayService {
         existingIds: Set<String> = emptySet(),
         limit: Int = 16
     ): List<AudioTrack> = withContext(Dispatchers.IO) {
+        val cacheKey = "${seedTrack.id}_$limit"
+        val cached = contextualSimilarCache[cacheKey]
+        if (cached != null && cached.isNotEmpty()) {
+            return@withContext cached
+        }
+
         val (cleanArtist, cleanTitle) = extractCleanMetadata(seedTrack)
         val combinedQuery = "$cleanArtist $cleanTitle".trim()
 
@@ -102,26 +109,29 @@ object AutoplayService {
         val scDeferred = async {
             val list = mutableListOf<AudioTrack>()
             if (apiService != null) {
-                try {
-                    // Query 1: Track-specific match (remixes, originals, edits)
-                    val q1Resp = apiService.searchSoundCloudTracks(combinedQuery, limit = 6)
-                    if (q1Resp.isSuccessful) {
-                        q1Resp.body()?.forEach { dto ->
-                            list.add(AudioTrack.fromSoundCloud(dto, backendBaseUrl))
-                        }
-                    }
-
-                    // Query 2: Artist-level match (same vibe/genre)
-                    if (cleanArtist.isNotBlank() && cleanArtist != "Music") {
-                        val q2Resp = apiService.searchSoundCloudTracks(cleanArtist, limit = 6)
-                        if (q2Resp.isSuccessful) {
-                            q2Resp.body()?.forEach { dto ->
+                kotlinx.coroutines.withTimeoutOrNull(1500L) {
+                    try {
+                        // Query 1: Track-specific match (remixes, originals, edits)
+                        val q1Resp = apiService.searchSoundCloudTracks(combinedQuery, limit = 6)
+                        if (q1Resp.isSuccessful) {
+                            q1Resp.body()?.forEach { dto ->
                                 list.add(AudioTrack.fromSoundCloud(dto, backendBaseUrl))
                             }
                         }
+
+                        // Query 2: Artist-level match (same vibe/genre)
+                        if (cleanArtist.isNotBlank() && cleanArtist != "Music") {
+                            val q2Resp = apiService.searchSoundCloudTracks(cleanArtist, limit = 6)
+                            if (q2Resp.isSuccessful) {
+                                q2Resp.body()?.forEach { dto ->
+                                    list.add(AudioTrack.fromSoundCloud(dto, backendBaseUrl))
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "SoundCloud contextual fetch error: ${e.message}")
                     }
-                } catch (e: Exception) {
-                    Log.w(TAG, "SoundCloud contextual fetch error: ${e.message}")
+                    Unit
                 }
             }
             list
@@ -179,6 +189,9 @@ object AutoplayService {
         }
 
         Log.d(TAG, "Contextual similar tracks: got ${interleaved.size} (YT: ${filteredYt.size}, SC: ${filteredSc.size})")
+        if (interleaved.isNotEmpty()) {
+            contextualSimilarCache[cacheKey] = interleaved
+        }
         interleaved
     }
 

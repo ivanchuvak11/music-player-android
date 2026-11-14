@@ -27,7 +27,8 @@ fun AuthDialog(
     viewModel: MainPlayerViewModel,
     currentUser: String?,
     authStatus: String?,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onOpenStats: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     var emailInput by remember { mutableStateOf("") }
@@ -83,6 +84,19 @@ fun AuthDialog(
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
+
+                if (onOpenStats != null) {
+                    OutlinedButton(
+                        onClick = {
+                            onDismiss()
+                            onOpenStats()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(stringResource(R.string.stats_open_btn), color = DarkRefTheme.AccentMint)
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
 
                 Button(
                     onClick = {

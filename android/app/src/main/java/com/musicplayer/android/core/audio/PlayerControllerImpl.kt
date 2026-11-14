@@ -54,7 +54,6 @@ class PlayerControllerImpl(
     private var retryJob: Job? = null
     private var pendingShuffleMode: Boolean? = null
     private var pendingRepeatMode: Int? = null
-    private var pendingPlaybackSpeed: Float? = null
     private var pendingSeekPositionMs: Long? = null
 
     // Fix #3: pending queue/play stored when controller not yet connected
@@ -112,10 +111,8 @@ class PlayerControllerImpl(
                         else -> Player.REPEAT_MODE_OFF
                     }
                 }
-                pendingPlaybackSpeed?.let { controller.setPlaybackSpeed(it) }
                 pendingShuffleMode = null
                 pendingRepeatMode = null
-                pendingPlaybackSpeed = null
 
                 setupPlayerListener()
                 updateState()
@@ -147,6 +144,14 @@ class PlayerControllerImpl(
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 updateState()
+                if (playbackState == Player.STATE_READY) {
+                    consecutiveErrors = 0
+                    retryJob?.cancel()
+                    retryJob = null
+                    if (_playbackState.value.errorMessage != null) {
+                        _playbackState.value = _playbackState.value.copy(errorMessage = null)
+                    }
+                }
                 if (playbackState == Player.STATE_ENDED) {
                     val controller = mediaController
                     if (controller != null) {
@@ -198,19 +203,12 @@ class PlayerControllerImpl(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                val isNetworkError = error.errorCode in listOf(
-                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-                    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
-                    PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
-                    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
-                    PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND
-                ) || error.message?.contains("Unable to connect", ignoreCase = true) == true
-                   || error.message?.contains("timeout", ignoreCase = true) == true
+                val isRealDeviceOffline = !com.musicplayer.android.core.network.NetworkConnectivityObserver(context).isCurrentlyConnected()
 
-                val message = if (isNetworkError) {
-                    "Немає підключення до мережі або сервер недоступний. Ви можете слухати збережені пісні та музику з пам'яті пристрою офлайн."
+                val message = if (isRealDeviceOffline) {
+                    "Немає підключення до мережі. Ви можете слухати збережені пісні та музику з пам'яті пристрою офлайн."
                 } else {
-                    "Помилка відтворення: ${error.localizedMessage ?: "невідомий формат або пошкоджений файл"}"
+                    "Не вдалося завантажити цей трек: ${error.localizedMessage ?: "джерело недоступне"}"
                 }
 
                 _playbackState.value = _playbackState.value.copy(
@@ -219,31 +217,31 @@ class PlayerControllerImpl(
                     isPlaying = false
                 )
 
-                if (isNetworkError) {
-                    // Якщо інтернету немає взагалі — НЕ перескакуємо на наступні треки в черзі,
-                    // а ставимо прапорець очікування відновлення мережі:
+                if (isRealDeviceOffline) {
                     pendingNetworkRecovery = true
                     retryJob?.cancel()
                     retryJob = null
                     return
                 }
 
-                // Auto-skip to next for non-network errors, but stop after maxConsecutiveErrors to prevent infinite loop
+                pendingNetworkRecovery = false
+
+                // Auto-skip to next playable track in queue when a stream fails online, up to maxConsecutiveErrors
                 val controller = mediaController
                 if (controller != null && controller.hasNextMediaItem()) {
                     consecutiveErrors++
                     if (consecutiveErrors <= maxConsecutiveErrors) {
                         retryJob?.cancel()
+                        val retryDelayMs = if (isExpiredStreamPlaybackError(error)) 2600L else 1200L
                         retryJob = scope.launch {
-                            delay(2500)
+                            delay(retryDelayMs)
                             val activeController = mediaController
-                            if (activeController != null && _playbackState.value.errorMessage != null && activeController.hasNextMediaItem()) {
+                            if (activeController != null && activeController.hasNextMediaItem()) {
                                 activeController.seekToNextMediaItem()
                                 activeController.play()
                             }
                         }
                     } else {
-                        // Exhausted retries — clear error and stop attempting auto-skip
                         consecutiveErrors = 0
                         retryJob?.cancel()
                         retryJob = null
@@ -303,8 +301,7 @@ class PlayerControllerImpl(
             hasNext = controller.hasNextMediaItem(),
             hasPrevious = controller.hasPreviousMediaItem(),
             shuffleModeEnabled = controller.shuffleModeEnabled,
-            repeatMode = mappedRepeatMode,
-            playbackSpeed = controller.playbackParameters.speed
+            repeatMode = mappedRepeatMode
         )
     }
 
@@ -313,6 +310,8 @@ class PlayerControllerImpl(
         fadeJob?.cancel()
         retryJob?.cancel()
         retryJob = null
+        consecutiveErrors = 0
+        pendingNetworkRecovery = false
         _playbackState.value = _playbackState.value.copy(isPlaying = true, errorMessage = null)
         controller.play()
         updateState()
@@ -367,7 +366,7 @@ class PlayerControllerImpl(
         _playbackState.value = _playbackState.value.copy(currentPositionMs = positionMs)
     }
 
-    override fun setQueue(tracks: List<AudioTrack>, startIndex: Int, autoPlay: Boolean) {
+    override fun setQueue(tracks: List<AudioTrack>, startIndex: Int, autoPlay: Boolean, startPositionMs: Long) {
         val previousQueue = currentQueue
         currentQueue = tracks
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
@@ -381,7 +380,7 @@ class PlayerControllerImpl(
         val safeStartIndex = startIndex.coerceIn(0, tracks.lastIndex)
         val targetTrack = tracks[safeStartIndex]
         val controller = mediaController
-        val explicitStartPos = pendingSeekPositionMs
+        val explicitStartPos = startPositionMs.takeIf { it > 0L } ?: pendingSeekPositionMs
         pendingSeekPositionMs = null
 
         if (controller == null) {
@@ -427,6 +426,8 @@ class PlayerControllerImpl(
 
     override fun playTrack(track: AudioTrack, startPositionMs: Long) {
         _playbackState.value = _playbackState.value.copy(errorMessage = null)
+        consecutiveErrors = 0
+        pendingNetworkRecovery = false
         if (startPositionMs > 0L) {
             pendingSeekPositionMs = startPositionMs
         }
@@ -503,18 +504,6 @@ class PlayerControllerImpl(
             else -> PlaybackState.REPEAT_MODE_OFF
         }
         setRepeatMode(nextMode)
-    }
-
-    override fun setPlaybackSpeed(speed: Float) {
-        val clampedSpeed = speed.coerceIn(0.25f, 3.0f)
-        val controller = mediaController
-        if (controller != null) {
-            controller.setPlaybackSpeed(clampedSpeed)
-            pendingPlaybackSpeed = null
-        } else {
-            pendingPlaybackSpeed = clampedSpeed
-        }
-        _playbackState.value = _playbackState.value.copy(playbackSpeed = clampedSpeed)
     }
 
     override fun skipToQueueItem(index: Int) {
@@ -607,6 +596,5 @@ class PlayerControllerImpl(
         mediaController = null
         pendingQueue = null
         pendingSeekPositionMs = null
-        pendingPlaybackSpeed = null
     }
 }

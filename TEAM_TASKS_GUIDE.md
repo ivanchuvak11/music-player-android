@@ -120,6 +120,7 @@
     - `EqualizerDialog.kt` (панель еквалайзера та пресетів)
     - `PlaylistsScreen.kt` (створення та перегляд плейлистів)
     - `AuthDialog.kt` (вхід/реєстрація)
+    - Оформити секції добірок/жанрів і вікно плейлистів з YouTube/SoundCloud (`ExternalPlaylistsDialog.kt`, тригери в `HOME`/`PLAYLISTS`), а також усунути нашаровування списку на верхній пошук і нижній мініплеєр у `MainActivity.kt` (перевести кореневий `Box` з фіксованим `listContentPadding` у послідовний `Column` або динамічні відступи).
 
 ---
 
