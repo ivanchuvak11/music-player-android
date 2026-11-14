@@ -13,11 +13,14 @@
     <!-- M11 FIX: Bluetooth headset controls on Android 12+ -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- Storage / Local Audio playback -->
+    <!-- Storage / Local Audio playback & Downloads -->
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
         android:name=".MusicPlayerApp"

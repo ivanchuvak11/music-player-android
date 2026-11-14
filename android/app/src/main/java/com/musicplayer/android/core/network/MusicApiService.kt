@@ -20,6 +20,12 @@ interface MusicApiService {
     @POST("api/auth/login")
     suspend fun login(@Body request: LoginRequestDto): Response<AuthResponseDto>
 
+    @POST("api/auth/refresh")
+    suspend fun refreshToken(@Body request: RefreshTokenRequestDto): Response<AuthResponseDto>
+
+    @POST("api/auth/revoke")
+    suspend fun revokeToken(@Body request: RefreshTokenRequestDto): Response<RevokeResponseDto>
+
     // Users
     @GET("api/users/me")
     suspend fun getCurrentUser(): Response<UserDto>
@@ -138,4 +144,14 @@ interface MusicApiService {
 
     @GET("api/youtube/tracks/{id}")
     suspend fun getYouTubeTrack(@Path("id") id: String): Response<YouTubeTrackDto>
+
+    // Stats & Analytics (Lab 5)
+    @GET("api/stats/user-summary")
+    suspend fun getUserStatsSummary(@Query("period") period: String = "week"): Response<UserStatsSummaryDto>
+
+    @GET("api/stats/system-report")
+    suspend fun getSystemReport(@Query("period") period: String = "week"): Response<SystemReportDto>
+
+    @GET("api/stats/overview")
+    suspend fun getPublicOverview(): Response<PublicOverviewDto>
 }

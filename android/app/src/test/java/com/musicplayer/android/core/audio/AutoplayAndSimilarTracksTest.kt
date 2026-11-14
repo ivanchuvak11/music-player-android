@@ -1,6 +1,7 @@
 package com.musicplayer.android.core.audio
 
 import com.musicplayer.android.core.network.YouTubeTrackDto
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -69,6 +70,62 @@ class AutoplayAndSimilarTracksTest {
         assertEquals(seed.id, fullRadioQueue.first().id)
         assertEquals("youtube_sim1", fullRadioQueue[1].id)
         assertEquals("youtube_sim2", fullRadioQueue[2].id)
+    }
+
+    @Test
+    fun extractCleanMetadataStripsVideoNoiseAndFeatures() {
+        val dirtyTrack1 = AudioTrack(
+            id = "youtube_test1",
+            title = "Hello (Official Music Video)",
+            artist = "Adele - Topic",
+            audioUrl = "https://youtube.com/watch?v=test1"
+        )
+        val (artist1, title1) = AutoplayService.extractCleanMetadata(dirtyTrack1)
+        assertEquals("Adele", artist1)
+        assertEquals("Hello", title1)
+
+        val dirtyTrack2 = AudioTrack(
+            id = "youtube_test2",
+            title = "Blinding Lights [4K Visualizer] feat. Rosalía",
+            artist = "The Weeknd",
+            audioUrl = "https://youtube.com/watch?v=test2"
+        )
+        val (artist2, title2) = AutoplayService.extractCleanMetadata(dirtyTrack2)
+        assertEquals("The Weeknd", artist2)
+        assertEquals("Blinding Lights", title2)
+    }
+
+    @Test
+    fun resolveDirectStreamUrlHandlesAllSources() = runBlocking {
+        // 1. Direct audio track
+        val directTrack = AudioTrack(
+            id = "local_1",
+            title = "Song",
+            artist = "Artist",
+            audioUrl = "https://example.com/audio.mp3"
+        )
+        val resolvedDirect = TrackDownloadManager.resolveDirectStreamUrl(directTrack)
+        assertEquals("https://example.com/audio.mp3", resolvedDirect)
+
+        // 2. SoundCloud track
+        val scTrack = AudioTrack(
+            id = "soundcloud_998877",
+            title = "SC Song",
+            artist = "SC Artist",
+            audioUrl = "/api/soundcloud/tracks/998877/stream"
+        )
+        val resolvedSc = TrackDownloadManager.resolveDirectStreamUrl(scTrack, "http://152.70.19.219/")
+        assertEquals("http://152.70.19.219/api/soundcloud/tracks/998877/stream", resolvedSc)
+
+        // 3. Jamendo track
+        val jamTrack = AudioTrack(
+            id = "jamendo_554433",
+            title = "Jam Song",
+            artist = "Jam Artist",
+            audioUrl = ""
+        )
+        val resolvedJam = TrackDownloadManager.resolveDirectStreamUrl(jamTrack, "http://152.70.19.219/")
+        assertEquals("http://152.70.19.219/api/jamendo/tracks/554433/stream", resolvedJam)
     }
 
     private fun track(id: String, title: String, artist: String) = YouTubeTrackDto(

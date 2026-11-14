@@ -17,8 +17,14 @@ interface CachedTrackDao {
     @Query("SELECT * FROM cached_tracks WHERE id = :id LIMIT 1")
     suspend fun getTrackById(id: String): CachedTrackEntity?
 
+    @Query("SELECT * FROM cached_tracks WHERE id = :id LIMIT 1")
+    fun getTrackByIdDirect(id: String): CachedTrackEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTrack(track: CachedTrackEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMetadataIfAbsent(track: CachedTrackEntity)
 
     @Query("DELETE FROM cached_tracks WHERE id = :id")
     suspend fun deleteTrack(id: String)

@@ -18,9 +18,25 @@ data class LoginRequestDto(
 @Serializable
 data class AuthResponseDto(
     val token: String? = null,
+    val accessToken: String? = null,
+    val refreshToken: String? = null,
+    val expiresIn: Long? = null,
     val userId: Int? = null,
     val username: String? = null,
     val email: String? = null
+) {
+    fun resolvedAccessToken(): String? =
+        accessToken?.takeIf { it.isNotBlank() } ?: token?.takeIf { it.isNotBlank() }
+}
+
+@Serializable
+data class RefreshTokenRequestDto(
+    val refreshToken: String
+)
+
+@Serializable
+data class RevokeResponseDto(
+    val message: String? = null
 )
 
 @Serializable
@@ -28,8 +44,15 @@ data class UserDto(
     val id: Int,
     val username: String,
     val email: String,
-    val createdAt: String? = null
-)
+    val createdAt: String? = null,
+    val token: String? = null,
+    val accessToken: String? = null,
+    val refreshToken: String? = null,
+    val expiresIn: Long? = null
+) {
+    fun resolvedAccessToken(): String? =
+        accessToken?.takeIf { it.isNotBlank() } ?: token?.takeIf { it.isNotBlank() }
+}
 
 @Serializable
 data class PlaylistSummaryDto(
@@ -177,4 +200,73 @@ data class YouTubeTrackDto(
     val durationMs: Long? = null,
     val youTubeUrl: String? = null,
     val streamUrl: String? = null
+)
+
+// ─── Lab 5: Stats & Analytics DTOs ───────────────────────────────────────────
+
+@Serializable
+data class TopArtistDto(
+    val artist: String = "",
+    val trackCount: Int = 0
+)
+
+@Serializable
+data class SourceStatDto(
+    val source: String = "",
+    val count: Int = 0,
+    val percentage: Double = 0.0
+)
+
+@Serializable
+data class RecentActivityItemDto(
+    val activityType: String = "",
+    val title: String = "",
+    val artistOrDetails: String = "",
+    val source: String = "",
+    val timestamp: String = ""
+)
+
+@Serializable
+data class UserStatsSummaryDto(
+    val period: String = "",
+    val startDateUtc: String? = null,
+    val endDateUtc: String = "",
+    val playlistsCreatedCount: Int = 0,
+    val tracksAddedCount: Int = 0,
+    val favoritesAddedCount: Int = 0,
+    val radioFavoritesAddedCount: Int = 0,
+    val totalSavedItemsCount: Int = 0,
+    val totalDurationMs: Long = 0L,
+    val totalDurationMinutes: Double = 0.0,
+    val topArtists: List<TopArtistDto> = emptyList(),
+    val sourceBreakdown: List<SourceStatDto> = emptyList(),
+    val recentActivity: List<RecentActivityItemDto> = emptyList()
+)
+
+@Serializable
+data class SystemReportDto(
+    val period: String = "",
+    val startDateUtc: String? = null,
+    val endDateUtc: String = "",
+    val totalUsers: Int = 0,
+    val newUsersInPeriod: Int = 0,
+    val totalPlaylists: Int = 0,
+    val newPlaylistsInPeriod: Int = 0,
+    val totalPlaylistTracks: Int = 0,
+    val playlistTracksAddedInPeriod: Int = 0,
+    val totalFavoriteTracks: Int = 0,
+    val favoriteTracksAddedInPeriod: Int = 0,
+    val totalFavoriteRadioStations: Int = 0,
+    val platformTopArtists: List<TopArtistDto> = emptyList(),
+    val platformSourceDistribution: List<SourceStatDto> = emptyList()
+)
+
+@Serializable
+data class PublicOverviewDto(
+    val status: String = "Online",
+    val serverTimeUtc: String = "",
+    val supportedAudioSourcesCount: Int = 4,
+    val supportedSources: List<String> = emptyList(),
+    val totalPublicPlaylistsCount: Int = 0,
+    val totalPublicTracksCount: Int = 0
 )
